@@ -1,19 +1,17 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import api from "@/lib/api";
 
-// Lab → sRGB 변환
+// ============ Lab → RGB 변환 ============
 function labToRgb(L: number, a: number, b: number): string {
   let y = (L + 16) / 116;
   let x = a / 500 + y;
   let z = y - b / 200;
-  x = x > 0.206897 ? x * x * x : (x - 16 / 116) / 7.787;
-  y = y > 0.206897 ? y * y * y : (y - 16 / 116) / 7.787;
-  z = z > 0.206897 ? z * z * z : (z - 16 / 116) / 7.787;
-  x *= 0.95047;
-  z *= 1.08883;
+  x = 0.95047 * (x * x * x > 0.008856 ? x * x * x : (x - 16 / 116) / 7.787);
+  y = 1.0 * (y * y * y > 0.008856 ? y * y * y : (y - 16 / 116) / 7.787);
+  z = 1.08883 * (z * z * z > 0.008856 ? z * z * z : (z - 16 / 116) / 7.787);
   let r = x * 3.2406 + y * -1.5372 + z * -0.4986;
   let g = x * -0.9689 + y * 1.8758 + z * 0.0415;
   let bVal = x * 0.0557 + y * -0.204 + z * 1.057;
@@ -21,497 +19,543 @@ function labToRgb(L: number, a: number, b: number): string {
   g = g > 0.0031308 ? 1.055 * Math.pow(g, 1 / 2.4) - 0.055 : 12.92 * g;
   bVal = bVal > 0.0031308 ? 1.055 * Math.pow(bVal, 1 / 2.4) - 0.055 : 12.92 * bVal;
   const clamp = (v: number) => Math.max(0, Math.min(255, Math.round(v * 255)));
-  return `rgb(${clamp(r)}, ${clamp(g)}, ${clamp(bVal)})`;
+  return `rgb(${clamp(r)},${clamp(g)},${clamp(bVal)})`;
 }
 
-type TabType = "inks" | "plates" | "pads" | "base_colors" | "white_refs";
+// ============ 타입 정의 ============
+interface Ink {
+  ink_id: number; ink_name: string; ink_type?: string;
+  solid_L_SCI?: number; solid_a_SCI?: number; solid_b_SCI?: number;
+  solid_L_SCE?: number; solid_a_SCE?: number; solid_b_SCE?: number;
+  gloss_GU?: number; manufacturer?: string; delta_SCI_SCE?: number;
+  color_index?: string; viscosity?: number; density?: number; shelf_life_months?: number;
+  memo?: string;
+}
+interface Plate {
+  plate_id: number; plate_code?: string; plate_name?: string;
+  etch_depth?: number; depth_measurement_density?: number;
+  screen_ruling?: number; dot_density?: number; condition?: string;
+  linked_pattern?: string; manufacturer?: string; material?: string;
+  roller_diameter?: number; cell_volume?: number; memo?: string;
+}
+interface Pad {
+  pad_id: number; pad_code?: string; hardness?: number; condition?: string;
+  pad_shape?: string; pad_material?: string; diameter_mm?: number;
+  tags?: string; memo?: string;
+}
+interface BaseColorType {
+  base_color_id: number; base_color_name: string;
+  color_code?: string; color_category?: string; paint_type?: string;
+  thickness_um?: number; surface_type?: string;
+  L_SCI?: number; a_SCI?: number; b_SCI?: number;
+  L_SCE?: number; a_SCE?: number; b_SCE?: number;
+  gloss_GU?: number; paint_manufacturer?: string; delta_SCI_SCE?: number;
+  linked_pattern?: string; memo?: string;
+}
+interface WhiteRef {
+  white_ref_id: number; ref_name: string; customer?: string;
+  L_SCI?: number; a_SCI?: number; b_SCI?: number;
+  L_SCE?: number; a_SCE?: number; b_SCE?: number;
+  led_info?: string; memo?: string;
+}
+interface Recipe {
+  recipe_id: number; recipe_name: string; ink_items?: any[];
+  thinner_pct?: number; hardener_pct?: number;
+  ink_total_g?: number; thinner_g?: number; hardener_g?: number; total_weight_g?: number;
+  result_L_SCI?: number; result_a_SCI?: number; result_b_SCI?: number;
+  result_L_SCE?: number; result_a_SCE?: number; result_b_SCE?: number;
+  result_delta_E?: number; linked_color_id?: number; linked_sample_id?: number;
+  memo?: string;
+}
+
+type TabType = "inks" | "plates" | "pads" | "base_colors" | "white_refs" | "recipes";
 
 export default function MasterPage() {
   const router = useRouter();
   const [tab, setTab] = useState<TabType>("inks");
 
-  // 데이터
-  const [inks, setInks] = useState<any[]>([]);
-  const [plates, setPlates] = useState<any[]>([]);
-  const [pads, setPads] = useState<any[]>([]);
-  const [baseColors, setBaseColors] = useState<any[]>([]);
-  const [whiteRefs, setWhiteRefs] = useState<any[]>([]);
+  // 데이터 상태
+  const [inks, setInks] = useState<Ink[]>([]);
+  const [plates, setPlates] = useState<Plate[]>([]);
+  const [pads, setPads] = useState<Pad[]>([]);
+  const [baseColors, setBaseColors] = useState<BaseColorType[]>([]);
+  const [whiteRefs, setWhiteRefs] = useState<WhiteRef[]>([]);
+  const [recipes, setRecipes] = useState<Recipe[]>([]);
 
-  // 폼 표시
+  // 폼 상태
   const [showForm, setShowForm] = useState(false);
-  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editId, setEditId] = useState<number | null>(null);
   const [form, setForm] = useState<any>({});
 
-  useEffect(() => {
-    fetchAll();
-  }, []);
+  // 상세보기
+  const [detailId, setDetailId] = useState<number | null>(null);
 
-  const fetchAll = async () => {
+  const tabs: { key: TabType; label: string }[] = [
+    { key: "inks", label: "잉크" },
+    { key: "plates", label: "동판" },
+    { key: "pads", label: "패드" },
+    { key: "base_colors", label: "베이스컬러" },
+    { key: "white_refs", label: "백색기준" },
+    { key: "recipes", label: "확정레시피" },
+  ];
+
+  // ============ 데이터 로드 ============
+  const loadData = async () => {
     try {
-      const [i, p, pd, bc, wr] = await Promise.all([
-        api.get("/api/inks/"),
-        api.get("/api/plates/"),
-        api.get("/api/pads/"),
-        api.get("/api/base-colors/"),
-        api.get("/api/white-refs/"),
+      const [r1, r2, r3, r4, r5, r6] = await Promise.all([
+        api.get("/api/inks/"), api.get("/api/plates/"), api.get("/api/pads/"),
+        api.get("/api/base-colors/"), api.get("/api/white-refs/"), api.get("/api/recipes/"),
       ]);
-      setInks(i.data);
-      setPlates(p.data);
-      setPads(pd.data);
-      setBaseColors(bc.data);
-      setWhiteRefs(wr.data);
-    } catch (err) {
-      console.error("마스터 데이터 로드 실패:", err);
-    }
+      setInks(r1.data); setPlates(r2.data); setPads(r3.data);
+      setBaseColors(r4.data); setWhiteRefs(r5.data); setRecipes(r6.data);
+    } catch (e) { console.error(e); }
   };
 
-  const tabConfig: Record<TabType, { label: string; endpoint: string; idField: string }> = {
-    inks: { label: "잉크", endpoint: "/api/inks", idField: "ink_id" },
-    plates: { label: "동판", endpoint: "/api/plates", idField: "plate_id" },
-    pads: { label: "패드", endpoint: "/api/pads", idField: "pad_id" },
-    base_colors: { label: "베이스컬러", endpoint: "/api/base-colors", idField: "base_color_id" },
-    white_refs: { label: "백색기준", endpoint: "/api/white-refs", idField: "white_ref_id" },
-  };
+  useEffect(() => { loadData(); }, []);
 
-  const getData = () => {
-    switch (tab) {
-      case "inks": return inks;
-      case "plates": return plates;
-      case "pads": return pads;
-      case "base_colors": return baseColors;
-      case "white_refs": return whiteRefs;
-    }
-  };
-
-  const getEmptyForm = (): any => {
-    switch (tab) {
-      case "inks":
-        return { ink_name: "", ink_type: "color_ink", solid_L_SCI: "", solid_a_SCI: "", solid_b_SCI: "", solid_L_SCE: "", solid_a_SCE: "", solid_b_SCE: "", gloss_GU: "", manufacturer: "", memo: "" };
-      case "plates":
-        return { plate_code: "", plate_name: "", etch_depth: "", depth_measurement_density: "", screen_ruling: "", dot_density: "", condition: "", linked_pattern: "", memo: "" };
-      case "pads":
-        return { pad_code: "", hardness: "", condition: "", tags: "", memo: "" };
-      case "base_colors":
-        return { base_color_name: "", L_SCI: "", a_SCI: "", b_SCI: "", L_SCE: "", a_SCE: "", b_SCE: "", gloss_GU: "", paint_manufacturer: "", linked_pattern: "", memo: "" };
-      case "white_refs":
-        return { ref_name: "", customer: "", L_SCI: "", a_SCI: "", b_SCI: "", L_SCE: "", a_SCE: "", b_SCE: "", led_info: "", memo: "" };
-    }
-  };
+  // ============ 폼 초기화 ============
+  const resetForm = () => { setForm({}); setEditId(null); setShowForm(false); };
 
   const openNewForm = () => {
-    setEditingId(null);
-    setForm(getEmptyForm());
+    setEditId(null);
+    setDetailId(null);
+    if (tab === "inks") setForm({ ink_name: "", ink_type: "color_ink", manufacturer: "", color_index: "", viscosity: "", density: "", shelf_life_months: "", solid_L_SCI: "", solid_a_SCI: "", solid_b_SCI: "", solid_L_SCE: "", solid_a_SCE: "", solid_b_SCE: "", gloss_GU: "", memo: "" });
+    else if (tab === "plates") setForm({ plate_code: "", plate_name: "", etch_depth: "", depth_measurement_density: "", screen_ruling: "", dot_density: "", condition: "", linked_pattern: "", manufacturer: "", material: "", roller_diameter: "", cell_volume: "", memo: "" });
+    else if (tab === "pads") setForm({ pad_code: "", hardness: "", condition: "", pad_shape: "", pad_material: "", diameter_mm: "", tags: "", memo: "" });
+    else if (tab === "base_colors") setForm({ base_color_name: "", color_code: "", color_category: "", paint_type: "", thickness_um: "", surface_type: "", L_SCI: "", a_SCI: "", b_SCI: "", L_SCE: "", a_SCE: "", b_SCE: "", gloss_GU: "", paint_manufacturer: "", linked_pattern: "", memo: "" });
+    else if (tab === "white_refs") setForm({ ref_name: "", customer: "", L_SCI: "", a_SCI: "", b_SCI: "", L_SCE: "", a_SCE: "", b_SCE: "", led_info: "", memo: "" });
+    else if (tab === "recipes") setForm({ recipe_name: "", thinner_pct: "", hardener_pct: "", memo: "" });
     setShowForm(true);
   };
 
   const openEditForm = (item: any) => {
-    setEditingId(item[tabConfig[tab].idField]);
-    const f: any = {};
-    const empty = getEmptyForm();
-    for (const key of Object.keys(empty)) {
-      f[key] = item[key] ?? "";
-    }
-    setForm(f);
+    setDetailId(null);
+    const cleaned: any = {};
+    Object.keys(item).forEach(k => { cleaned[k] = item[k] === null || item[k] === undefined ? "" : item[k]; });
+    setForm(cleaned);
+    setEditId(
+      tab === "inks" ? item.ink_id : tab === "plates" ? item.plate_id :
+      tab === "pads" ? item.pad_id : tab === "base_colors" ? item.base_color_id :
+      tab === "white_refs" ? item.white_ref_id : item.recipe_id
+    );
     setShowForm(true);
   };
 
-  const saveForm = async () => {
-    const { endpoint, idField } = tabConfig[tab];
+  // ============ 저장 ============
+  const handleSave = async () => {
+    const endpoint = tab === "inks" ? "/api/inks/" : tab === "plates" ? "/api/plates/" :
+      tab === "pads" ? "/api/pads/" : tab === "base_colors" ? "/api/base-colors/" :
+      tab === "white_refs" ? "/api/white-refs/" : "/api/recipes/";
+
+    // 빈 문자열 → null, 숫자 변환
     const payload: any = {};
-    for (const [key, value] of Object.entries(form)) {
-      if (value === "") {
-        payload[key] = null;
-      } else if (typeof value === "string" && !isNaN(Number(value)) && key !== "ink_name" && key !== "ink_type" && key !== "plate_code" && key !== "plate_name" && key !== "pad_code" && key !== "condition" && key !== "tags" && key !== "manufacturer" && key !== "memo" && key !== "base_color_name" && key !== "paint_manufacturer" && key !== "linked_pattern" && key !== "ref_name" && key !== "customer" && key !== "led_info") {
-        payload[key] = Number(value);
+    Object.keys(form).forEach(k => {
+      if (["registered_at", "updated_at", "delta_SCI_SCE", "ink_id", "plate_id", "pad_id", "base_color_id", "white_ref_id", "recipe_id", "ink_total_g", "thinner_g", "hardener_g", "total_weight_g", "result_delta_E"].includes(k)) return;
+      const v = form[k];
+      if (v === "" || v === undefined) { payload[k] = null; return; }
+      if (["solid_L_SCI","solid_a_SCI","solid_b_SCI","solid_L_SCE","solid_a_SCE","solid_b_SCE","gloss_GU","viscosity","density","etch_depth","depth_measurement_density","screen_ruling","dot_density","roller_diameter","cell_volume","hardness","diameter_mm","L_SCI","a_SCI","b_SCI","L_SCE","a_SCE","b_SCE","thickness_um","thinner_pct","hardener_pct","result_L_SCI","result_a_SCI","result_b_SCI","result_L_SCE","result_a_SCE","result_b_SCE"].includes(k)) {
+        payload[k] = v === null ? null : parseFloat(v);
+      } else if (["shelf_life_months","linked_color_id","linked_sample_id"].includes(k)) {
+        payload[k] = v === null ? null : parseInt(v);
       } else {
-        payload[key] = value;
+        payload[k] = v;
       }
-    }
+    });
 
     try {
-      if (editingId) {
-        await api.put(`${endpoint}/${editingId}`, payload);
+      if (editId) {
+        await api.put(`${endpoint}${editId}`, payload);
       } else {
-        await api.post(`${endpoint}/`, payload);
+        await api.post(endpoint, payload);
       }
-      setShowForm(false);
-      setEditingId(null);
-      fetchAll();
-    } catch (err) {
-      console.error("저장 실패:", err);
-      alert("저장에 실패했습니다.");
+      resetForm();
+      loadData();
+    } catch (e: any) {
+      alert("저장 실패: " + (e.response?.data?.detail || e.message));
     }
   };
 
-  const deleteItem = async (id: number) => {
-    if (!confirm("삭제하시겠습니까?")) return;
-    const { endpoint } = tabConfig[tab];
+  // ============ 삭제 ============
+  const handleDelete = async (id: number) => {
+    if (!confirm("정말 삭제하시겠습니까?")) return;
+    const endpoint = tab === "inks" ? "/api/inks/" : tab === "plates" ? "/api/plates/" :
+      tab === "pads" ? "/api/pads/" : tab === "base_colors" ? "/api/base-colors/" :
+      tab === "white_refs" ? "/api/white-refs/" : "/api/recipes/";
     try {
-      await api.delete(`${endpoint}/${id}`);
-      fetchAll();
-    } catch (err) {
-      console.error("삭제 실패:", err);
+      await api.delete(`${endpoint}${id}`);
+      loadData();
+      if (detailId === id) setDetailId(null);
+    } catch (e: any) {
+      alert("삭제 실패: " + (e.response?.data?.detail || e.message));
     }
   };
 
-  const renderTable = () => {
-    const data = getData();
-    if (data.length === 0) {
-      return <p className="text-center text-gray-400 py-10">등록된 데이터가 없습니다.</p>;
-    }
+  // ============ 폼 필드 렌더링 ============
+  const renderField = (label: string, key: string, type: string = "text", placeholder?: string) => (
+    <div key={key} style={{ marginBottom: 8 }}>
+      <label style={{ fontSize: 12, color: "#666", display: "block", marginBottom: 2 }}>{label}</label>
+      {type === "textarea" ? (
+        <textarea value={form[key] || ""} onChange={e => setForm({ ...form, [key]: e.target.value })}
+          style={{ width: "100%", padding: 6, border: "1px solid #ddd", borderRadius: 4, fontSize: 13, minHeight: 60 }}
+          placeholder={placeholder} />
+      ) : type === "select" ? (
+        <select value={form[key] || ""} onChange={e => setForm({ ...form, [key]: e.target.value })}
+          style={{ width: "100%", padding: 6, border: "1px solid #ddd", borderRadius: 4, fontSize: 13 }}>
+          {placeholder?.split(",").map(o => <option key={o} value={o}>{o || "선택"}</option>)}
+        </select>
+      ) : (
+        <input type={type} value={form[key] ?? ""} onChange={e => setForm({ ...form, [key]: e.target.value })}
+          style={{ width: "100%", padding: 6, border: "1px solid #ddd", borderRadius: 4, fontSize: 13 }}
+          placeholder={placeholder} />
+      )}
+    </div>
+  );
 
-    switch (tab) {
-      case "inks":
-        return (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-100">
-                <tr>
-                  <th className="px-3 py-2 text-left">컬러</th>
-                  <th className="px-3 py-2 text-left">잉크명</th>
-                  <th className="px-3 py-2 text-left">타입</th>
-                  <th className="px-3 py-2 text-right">L*(SCI)</th>
-                  <th className="px-3 py-2 text-right">a*(SCI)</th>
-                  <th className="px-3 py-2 text-right">b*(SCI)</th>
-                  <th className="px-3 py-2 text-right">ΔE(SCI-SCE)</th>
-                  <th className="px-3 py-2 text-left">제조사</th>
-                  <th className="px-3 py-2 text-center">관리</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.map((item: any) => (
-                  <tr key={item.ink_id} className="border-b hover:bg-gray-50">
-                    <td className="px-3 py-2">
-                      {item.solid_L_SCI != null && (
-                        <div
-                          className="w-8 h-8 rounded border border-gray-300"
-                          style={{ backgroundColor: labToRgb(item.solid_L_SCI, item.solid_a_SCI, item.solid_b_SCI) }}
-                        />
-                      )}
-                    </td>
-                    <td className="px-3 py-2 font-medium">{item.ink_name}</td>
-                    <td className="px-3 py-2 text-gray-500">{item.ink_type}</td>
-                    <td className="px-3 py-2 text-right">{item.solid_L_SCI}</td>
-                    <td className="px-3 py-2 text-right">{item.solid_a_SCI}</td>
-                    <td className="px-3 py-2 text-right">{item.solid_b_SCI}</td>
-                    <td className="px-3 py-2 text-right">{item.delta_SCI_SCE ?? "-"}</td>
-                    <td className="px-3 py-2 text-gray-500">{item.manufacturer}</td>
-                    <td className="px-3 py-2 text-center">
-                      <button onClick={() => openEditForm(item)} className="text-blue-500 hover:text-blue-700 text-xs mr-2">수정</button>
-                      <button onClick={() => deleteItem(item.ink_id)} className="text-red-400 hover:text-red-600 text-xs">삭제</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        );
-
-      case "plates":
-        return (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-100">
-                <tr>
-                  <th className="px-3 py-2 text-left">코드</th>
-                  <th className="px-3 py-2 text-left">이름</th>
-                  <th className="px-3 py-2 text-right">식각깊이</th>
-                  <th className="px-3 py-2 text-right">스크린선수</th>
-                  <th className="px-3 py-2 text-right">도트밀도</th>
-                  <th className="px-3 py-2 text-left">상태</th>
-                  <th className="px-3 py-2 text-left">적용패턴</th>
-                  <th className="px-3 py-2 text-center">관리</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.map((item: any) => (
-                  <tr key={item.plate_id} className="border-b hover:bg-gray-50">
-                    <td className="px-3 py-2 font-medium">{item.plate_code}</td>
-                    <td className="px-3 py-2">{item.plate_name}</td>
-                    <td className="px-3 py-2 text-right">{item.etch_depth}</td>
-                    <td className="px-3 py-2 text-right">{item.screen_ruling}</td>
-                    <td className="px-3 py-2 text-right">{item.dot_density}</td>
-                    <td className="px-3 py-2 text-gray-500">{item.condition}</td>
-                    <td className="px-3 py-2 text-gray-500">{item.linked_pattern}</td>
-                    <td className="px-3 py-2 text-center">
-                      <button onClick={() => openEditForm(item)} className="text-blue-500 hover:text-blue-700 text-xs mr-2">수정</button>
-                      <button onClick={() => deleteItem(item.plate_id)} className="text-red-400 hover:text-red-600 text-xs">삭제</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        );
-
-      case "pads":
-        return (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-100">
-                <tr>
-                  <th className="px-3 py-2 text-left">코드</th>
-                  <th className="px-3 py-2 text-right">경도</th>
-                  <th className="px-3 py-2 text-left">상태</th>
-                  <th className="px-3 py-2 text-left">태그</th>
-                  <th className="px-3 py-2 text-left">메모</th>
-                  <th className="px-3 py-2 text-center">관리</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.map((item: any) => (
-                  <tr key={item.pad_id} className="border-b hover:bg-gray-50">
-                    <td className="px-3 py-2 font-medium">{item.pad_code}</td>
-                    <td className="px-3 py-2 text-right">{item.hardness}</td>
-                    <td className="px-3 py-2 text-gray-500">{item.condition}</td>
-                    <td className="px-3 py-2 text-gray-500">{item.tags}</td>
-                    <td className="px-3 py-2 text-gray-500">{item.memo}</td>
-                    <td className="px-3 py-2 text-center">
-                      <button onClick={() => openEditForm(item)} className="text-blue-500 hover:text-blue-700 text-xs mr-2">수정</button>
-                      <button onClick={() => deleteItem(item.pad_id)} className="text-red-400 hover:text-red-600 text-xs">삭제</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        );
-
-      case "base_colors":
-        return (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-100">
-                <tr>
-                  <th className="px-3 py-2 text-left">컬러</th>
-                  <th className="px-3 py-2 text-left">이름</th>
-                  <th className="px-3 py-2 text-right">L*(SCI)</th>
-                  <th className="px-3 py-2 text-right">a*(SCI)</th>
-                  <th className="px-3 py-2 text-right">b*(SCI)</th>
-                  <th className="px-3 py-2 text-right">ΔE(SCI-SCE)</th>
-                  <th className="px-3 py-2 text-left">도료사</th>
-                  <th className="px-3 py-2 text-left">적용패턴</th>
-                  <th className="px-3 py-2 text-center">관리</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.map((item: any) => (
-                  <tr key={item.base_color_id} className="border-b hover:bg-gray-50">
-                    <td className="px-3 py-2">
-                      {item.L_SCI != null && (
-                        <div
-                          className="w-8 h-8 rounded border border-gray-300"
-                          style={{ backgroundColor: labToRgb(item.L_SCI, item.a_SCI, item.b_SCI) }}
-                        />
-                      )}
-                    </td>
-                    <td className="px-3 py-2 font-medium">{item.base_color_name}</td>
-                    <td className="px-3 py-2 text-right">{item.L_SCI}</td>
-                    <td className="px-3 py-2 text-right">{item.a_SCI}</td>
-                    <td className="px-3 py-2 text-right">{item.b_SCI}</td>
-                    <td className="px-3 py-2 text-right">{item.delta_SCI_SCE ?? "-"}</td>
-                    <td className="px-3 py-2 text-gray-500">{item.paint_manufacturer}</td>
-                    <td className="px-3 py-2 text-gray-500">{item.linked_pattern}</td>
-                    <td className="px-3 py-2 text-center">
-                      <button onClick={() => openEditForm(item)} className="text-blue-500 hover:text-blue-700 text-xs mr-2">수정</button>
-                      <button onClick={() => deleteItem(item.base_color_id)} className="text-red-400 hover:text-red-600 text-xs">삭제</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        );
-
-      case "white_refs":
-        return (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-100">
-                <tr>
-                  <th className="px-3 py-2 text-left">컬러</th>
-                  <th className="px-3 py-2 text-left">이름</th>
-                  <th className="px-3 py-2 text-left">고객사</th>
-                  <th className="px-3 py-2 text-right">L*(SCI)</th>
-                  <th className="px-3 py-2 text-right">a*(SCI)</th>
-                  <th className="px-3 py-2 text-right">b*(SCI)</th>
-                  <th className="px-3 py-2 text-left">LED 정보</th>
-                  <th className="px-3 py-2 text-center">관리</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.map((item: any) => (
-                  <tr key={item.white_ref_id} className="border-b hover:bg-gray-50">
-                    <td className="px-3 py-2">
-                      {item.L_SCI != null && (
-                        <div
-                          className="w-8 h-8 rounded border border-gray-300"
-                          style={{ backgroundColor: labToRgb(item.L_SCI, item.a_SCI, item.b_SCI) }}
-                        />
-                      )}
-                    </td>
-                    <td className="px-3 py-2 font-medium">{item.ref_name}</td>
-                    <td className="px-3 py-2 text-gray-500">{item.customer}</td>
-                    <td className="px-3 py-2 text-right">{item.L_SCI}</td>
-                    <td className="px-3 py-2 text-right">{item.a_SCI}</td>
-                    <td className="px-3 py-2 text-right">{item.b_SCI}</td>
-                    <td className="px-3 py-2 text-gray-500">{item.led_info}</td>
-                    <td className="px-3 py-2 text-center">
-                      <button onClick={() => openEditForm(item)} className="text-blue-500 hover:text-blue-700 text-xs mr-2">수정</button>
-                      <button onClick={() => deleteItem(item.white_ref_id)} className="text-red-400 hover:text-red-600 text-xs">삭제</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        );
-    }
-  };
-
-  const renderForm = () => {
-    const fields = Object.keys(form);
-    const labelMap: Record<string, string> = {
-      ink_name: "잉크명 *", ink_type: "타입", solid_L_SCI: "L*(SCI)", solid_a_SCI: "a*(SCI)",
-      solid_b_SCI: "b*(SCI)", solid_L_SCE: "L*(SCE)", solid_a_SCE: "a*(SCE)", solid_b_SCE: "b*(SCE)",
-      gloss_GU: "광택(GU)", manufacturer: "제조사", memo: "메모",
-      plate_code: "코드", plate_name: "이름", etch_depth: "식각깊이", depth_measurement_density: "측정밀도",
-      screen_ruling: "스크린선수", dot_density: "도트밀도", condition: "상태", linked_pattern: "적용패턴",
-      pad_code: "코드", hardness: "경도", tags: "태그",
-      base_color_name: "이름 *", L_SCI: "L*(SCI)", a_SCI: "a*(SCI)", b_SCI: "b*(SCI)",
-      L_SCE: "L*(SCE)", a_SCE: "a*(SCE)", b_SCE: "b*(SCE)", paint_manufacturer: "도료사",
-      ref_name: "이름 *", customer: "고객사", led_info: "LED 정보",
-    };
-
-    // Lab 미리보기
-    let previewL: number | null = null;
-    let previewA: number | null = null;
-    let previewB: number | null = null;
-
-    if (tab === "inks" && form.solid_L_SCI && form.solid_a_SCI && form.solid_b_SCI) {
-      previewL = Number(form.solid_L_SCI);
-      previewA = Number(form.solid_a_SCI);
-      previewB = Number(form.solid_b_SCI);
-    } else if ((tab === "base_colors" || tab === "white_refs") && form.L_SCI && form.a_SCI && form.b_SCI) {
-      previewL = Number(form.L_SCI);
-      previewA = Number(form.a_SCI);
-      previewB = Number(form.b_SCI);
-    }
-
+  // ============ Lab 컬러박스 ============
+  const LabBox = ({ L, a, b, label }: { L?: number; a?: number; b?: number; label: string }) => {
+    if (L == null || a == null || b == null) return null;
     return (
-      <div className="mb-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
-        <div className="flex justify-between items-center mb-3">
-          <h3 className="text-sm font-semibold text-blue-800">
-            {editingId ? `${tabConfig[tab].label} 수정` : `새 ${tabConfig[tab].label} 등록`}
-          </h3>
-          {previewL !== null && previewA !== null && previewB !== null && (
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-gray-500">미리보기</span>
-              <div
-                className="w-10 h-10 rounded border border-gray-300"
-                style={{ backgroundColor: labToRgb(previewL, previewA, previewB) }}
-              />
+      <div style={{ display: "inline-flex", alignItems: "center", gap: 6, marginRight: 12 }}>
+        <div style={{ width: 24, height: 24, borderRadius: 4, border: "1px solid #ccc", background: labToRgb(L, a, b) }} />
+        <span style={{ fontSize: 11, color: "#666" }}>{label} L={L} a={a} b={b}</span>
+      </div>
+    );
+  };
+
+  // ============ 탭별 폼 ============
+  const renderForm = () => {
+    if (!showForm) return null;
+    return (
+      <div style={{ background: "#fff", border: "1px solid #ddd", borderRadius: 8, padding: 16, marginBottom: 16 }}>
+        <h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 12 }}>{editId ? "수정" : "신규 등록"}</h3>
+
+        {tab === "inks" && (<>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            {renderField("잉크명 *", "ink_name")}
+            {renderField("잉크타입", "ink_type", "select", ",color_ink,white_ink,clear_ink,special_ink")}
+            {renderField("제조사", "manufacturer")}
+            {renderField("CI번호", "color_index")}
+            {renderField("점도", "viscosity", "number")}
+            {renderField("비중", "density", "number")}
+            {renderField("유효기간(월)", "shelf_life_months", "number")}
+            {renderField("광택(GU)", "gloss_GU", "number")}
+          </div>
+          <div style={{ marginTop: 8, padding: 8, background: "#f8f9fa", borderRadius: 6 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6, color: "#333" }}>SCI 측정값</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+              {renderField("L* SCI", "solid_L_SCI", "number")}
+              {renderField("a* SCI", "solid_a_SCI", "number")}
+              {renderField("b* SCI", "solid_b_SCI", "number")}
             </div>
-          )}
-        </div>
-        <div className="grid grid-cols-3 gap-3">
-          {fields.map((key) => (
-            <div key={key}>
-              <label className="block text-xs text-gray-600 mb-1">
-                {labelMap[key] || key}
-              </label>
-              {key === "ink_type" ? (
-                <select
-                  value={form[key]}
-                  onChange={(e) => setForm({ ...form, [key]: e.target.value })}
-                  className="w-full border rounded px-2 py-1.5 text-sm"
-                >
-                  <option value="color_ink">컬러잉크</option>
-                  <option value="white">화이트</option>
-                  <option value="clear">클리어</option>
-                  <option value="metallic">메탈릭</option>
-                  <option value="other">기타</option>
-                </select>
-              ) : (
-                <input
-                  type="text"
-                  value={form[key]}
-                  onChange={(e) => setForm({ ...form, [key]: e.target.value })}
-                  className="w-full border rounded px-2 py-1.5 text-sm"
-                />
-              )}
+          </div>
+          <div style={{ marginTop: 8, padding: 8, background: "#f0f4f8", borderRadius: 6 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6, color: "#333" }}>SCE 측정값</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+              {renderField("L* SCE", "solid_L_SCE", "number")}
+              {renderField("a* SCE", "solid_a_SCE", "number")}
+              {renderField("b* SCE", "solid_b_SCE", "number")}
             </div>
-          ))}
-        </div>
-        <div className="mt-3 flex gap-2 justify-end">
-          <button
-            onClick={() => { setShowForm(false); setEditingId(null); }}
-            className="bg-gray-400 text-white px-3 py-1.5 rounded text-sm hover:bg-gray-500"
-          >
-            취소
+          </div>
+          {renderField("메모", "memo", "textarea")}
+        </>)}
+
+        {tab === "plates" && (<>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            {renderField("동판코드", "plate_code")}
+            {renderField("동판명", "plate_name")}
+            {renderField("제조사", "manufacturer")}
+            {renderField("재질", "material", "select", ",수지,스틸,물동판")}
+            {renderField("식각심도(μm)", "etch_depth", "number")}
+            {renderField("심도측정농도(%)", "depth_measurement_density", "number")}
+            {renderField("스크린선수(LPI)", "screen_ruling", "number")}
+            {renderField("망점농도(%)", "dot_density", "number")}
+            {renderField("롤러직경(mm)", "roller_diameter", "number")}
+            {renderField("셀용적(ml/m²)", "cell_volume", "number")}
+            {renderField("상태", "condition", "select", ",양호,마모,교체필요")}
+            {renderField("적용패턴", "linked_pattern")}
+          </div>
+          {renderField("메모", "memo", "textarea")}
+        </>)}
+
+        {tab === "pads" && (<>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            {renderField("패드코드", "pad_code")}
+            {renderField("경도(Shore A)", "hardness", "number")}
+            {renderField("형상", "pad_shape", "select", ",원형,사각,특수형")}
+            {renderField("재질", "pad_material", "select", ",실리콘,우레탄")}
+            {renderField("직경(mm)", "diameter_mm", "number")}
+            {renderField("상태", "condition", "select", ",양호,마모,교체필요")}
+            {renderField("태그", "tags")}
+          </div>
+          {renderField("메모", "memo", "textarea")}
+        </>)}
+
+        {tab === "base_colors" && (<>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            {renderField("베이스컬러명 *", "base_color_name")}
+            {renderField("색상코드", "color_code")}
+            {renderField("색상계열", "color_category", "select", ",화이트,블랙,실버,그레이,레드,블루,그린,옐로우,오렌지,퍼플,베이지,브라운,골드,기타")}
+            {renderField("도료종류", "paint_type", "select", ",수성,유성,UV,분체,기타")}
+            {renderField("도막두께(μm)", "thickness_um", "number")}
+            {renderField("표면유형", "surface_type", "select", ",유광,무광,반무광,펄,메탈릭,기타")}
+            {renderField("도료제조사", "paint_manufacturer")}
+            {renderField("광택(GU)", "gloss_GU", "number")}
+          </div>
+          <div style={{ marginTop: 8, padding: 8, background: "#f8f9fa", borderRadius: 6 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6, color: "#333" }}>SCI 측정값</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+              {renderField("L* SCI", "L_SCI", "number")}
+              {renderField("a* SCI", "a_SCI", "number")}
+              {renderField("b* SCI", "b_SCI", "number")}
+            </div>
+          </div>
+          <div style={{ marginTop: 8, padding: 8, background: "#f0f4f8", borderRadius: 6 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6, color: "#333" }}>SCE 측정값</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+              {renderField("L* SCE", "L_SCE", "number")}
+              {renderField("a* SCE", "a_SCE", "number")}
+              {renderField("b* SCE", "b_SCE", "number")}
+            </div>
+          </div>
+          {renderField("적용패턴(연동)", "linked_pattern")}
+          {renderField("메모", "memo", "textarea")}
+        </>)}
+
+        {tab === "white_refs" && (<>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            {renderField("기준명 *", "ref_name")}
+            {renderField("고객사", "customer")}
+            {renderField("LED 정보", "led_info")}
+          </div>
+          <div style={{ marginTop: 8, padding: 8, background: "#f8f9fa", borderRadius: 6 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6, color: "#333" }}>SCI 측정값</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+              {renderField("L* SCI", "L_SCI", "number")}
+              {renderField("a* SCI", "a_SCI", "number")}
+              {renderField("b* SCI", "b_SCI", "number")}
+            </div>
+          </div>
+          <div style={{ marginTop: 8, padding: 8, background: "#f0f4f8", borderRadius: 6 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6, color: "#333" }}>SCE 측정값</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+              {renderField("L* SCE", "L_SCE", "number")}
+              {renderField("a* SCE", "a_SCE", "number")}
+              {renderField("b* SCE", "b_SCE", "number")}
+            </div>
+          </div>
+          {renderField("메모", "memo", "textarea")}
+        </>)}
+
+        {tab === "recipes" && (<>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            {renderField("레시피명 *", "recipe_name")}
+            {renderField("시너비율(%)", "thinner_pct", "number")}
+            {renderField("경화제비율(%)", "hardener_pct", "number")}
+          </div>
+          {renderField("메모", "memo", "textarea")}
+        </>)}
+
+        {/* SCI Lab 미리보기 */}
+        {(form.solid_L_SCI || form.L_SCI) && (
+          <div style={{ marginTop: 8 }}>
+            <LabBox L={parseFloat(form.solid_L_SCI || form.L_SCI)} a={parseFloat(form.solid_a_SCI || form.a_SCI)} b={parseFloat(form.solid_b_SCI || form.b_SCI)} label="SCI" />
+            <LabBox L={parseFloat(form.solid_L_SCE || form.L_SCE)} a={parseFloat(form.solid_a_SCE || form.a_SCE)} b={parseFloat(form.solid_b_SCE || form.b_SCE)} label="SCE" />
+          </div>
+        )}
+
+        <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+          <button onClick={handleSave} style={{ padding: "8px 20px", background: "#2563eb", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600 }}>
+            {editId ? "수정 완료" : "등록"}
           </button>
-          <button
-            onClick={saveForm}
-            className="bg-blue-600 text-white px-3 py-1.5 rounded text-sm hover:bg-blue-700"
-          >
-            {editingId ? "수정 완료" : "등록"}
+          <button onClick={resetForm} style={{ padding: "8px 20px", background: "#e5e7eb", border: "none", borderRadius: 6, cursor: "pointer" }}>
+            취소
           </button>
         </div>
       </div>
     );
   };
 
-  return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-white shadow-sm border-b">
-        <div className="max-w-6xl mx-auto px-4 py-4 flex justify-between items-center">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => router.push("/")}
-              className="text-gray-500 hover:text-gray-800 text-sm"
-            >
-              ← 메인
-            </button>
-            <h1 className="text-xl font-bold text-gray-800">마스터 데이터 관리</h1>
+  // ============ 상세보기 ============
+  const renderDetail = () => {
+    if (detailId === null) return null;
+    let item: any = null;
+    if (tab === "inks") item = inks.find(i => i.ink_id === detailId);
+    else if (tab === "plates") item = plates.find(i => i.plate_id === detailId);
+    else if (tab === "pads") item = pads.find(i => i.pad_id === detailId);
+    else if (tab === "base_colors") item = baseColors.find(i => i.base_color_id === detailId);
+    else if (tab === "white_refs") item = whiteRefs.find(i => i.white_ref_id === detailId);
+    else if (tab === "recipes") item = recipes.find(i => i.recipe_id === detailId);
+    if (!item) return null;
+
+    return (
+      <div style={{ background: "#fff", border: "1px solid #2563eb", borderRadius: 8, padding: 16, marginBottom: 16 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <h3 style={{ fontSize: 15, fontWeight: 600 }}>상세 정보</h3>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button onClick={() => openEditForm(item)} style={{ padding: "4px 12px", background: "#f59e0b", color: "#fff", border: "none", borderRadius: 4, fontSize: 12, cursor: "pointer" }}>수정</button>
+            <button onClick={() => setDetailId(null)} style={{ padding: "4px 12px", background: "#e5e7eb", border: "none", borderRadius: 4, fontSize: 12, cursor: "pointer" }}>닫기</button>
           </div>
-          <button
-            onClick={openNewForm}
-            className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-700"
-          >
-            + {tabConfig[tab].label} 추가
+        </div>
+
+        {/* Lab 컬러 미리보기 */}
+        {(item.solid_L_SCI != null || item.L_SCI != null) && (
+          <div style={{ marginBottom: 12, padding: 10, background: "#f8f9fa", borderRadius: 6 }}>
+            <LabBox L={item.solid_L_SCI ?? item.L_SCI} a={item.solid_a_SCI ?? item.a_SCI} b={item.solid_b_SCI ?? item.b_SCI} label="SCI" />
+            <LabBox L={item.solid_L_SCE ?? item.L_SCE} a={item.solid_a_SCE ?? item.a_SCE} b={item.solid_b_SCE ?? item.b_SCE} label="SCE" />
+            {item.delta_SCI_SCE != null && <span style={{ fontSize: 12, color: "#dc2626", fontWeight: 600 }}>ΔE(SCI-SCE) = {item.delta_SCI_SCE}</span>}
+          </div>
+        )}
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4 }}>
+          {Object.entries(item).map(([k, v]) => {
+            if (["registered_at", "updated_at"].includes(k) && v) {
+              return <div key={k} style={{ fontSize: 12, padding: "2px 0" }}><span style={{ color: "#999" }}>{k}:</span> {new Date(v as string).toLocaleString("ko-KR")}</div>;
+            }
+            if (v === null || v === undefined) return null;
+            return <div key={k} style={{ fontSize: 12, padding: "2px 0" }}><span style={{ color: "#999" }}>{k}:</span> {String(v)}</div>;
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  // ============ 목록 렌더링 ============
+  const renderList = () => {
+    const getItems = (): any[] => {
+      if (tab === "inks") return inks;
+      if (tab === "plates") return plates;
+      if (tab === "pads") return pads;
+      if (tab === "base_colors") return baseColors;
+      if (tab === "white_refs") return whiteRefs;
+      return recipes;
+    };
+    const items = getItems();
+    if (items.length === 0) return <div style={{ textAlign: "center", padding: 40, color: "#999" }}>등록된 데이터가 없습니다</div>;
+
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {items.map((item, idx) => {
+          const id = item.ink_id || item.plate_id || item.pad_id || item.base_color_id || item.white_ref_id || item.recipe_id;
+          const name = item.ink_name || item.plate_name || item.plate_code || item.pad_code || item.base_color_name || item.ref_name || item.recipe_name || `#${id}`;
+
+          // 서브 정보
+          let sub = "";
+          if (tab === "inks") {
+            const parts = [];
+            if (item.ink_type) parts.push(item.ink_type);
+            if (item.manufacturer) parts.push(item.manufacturer);
+            if (item.color_index) parts.push(`CI: ${item.color_index}`);
+            if (item.viscosity) parts.push(`점도: ${item.viscosity}`);
+            sub = parts.join(" · ");
+          } else if (tab === "plates") {
+            const parts = [];
+            if (item.manufacturer) parts.push(item.manufacturer);
+            if (item.material) parts.push(item.material);
+            if (item.etch_depth) parts.push(`심도: ${item.etch_depth}μm`);
+            if (item.screen_ruling) parts.push(`${item.screen_ruling}LPI`);
+            sub = parts.join(" · ");
+          } else if (tab === "pads") {
+            const parts = [];
+            if (item.hardness) parts.push(`경도: ${item.hardness}`);
+            if (item.pad_shape) parts.push(item.pad_shape);
+            if (item.pad_material) parts.push(item.pad_material);
+            if (item.diameter_mm) parts.push(`Ø${item.diameter_mm}mm`);
+            sub = parts.join(" · ");
+          } else if (tab === "base_colors") {
+            const parts = [];
+            if (item.color_code) parts.push(item.color_code);
+            if (item.color_category) parts.push(item.color_category);
+            if (item.paint_type) parts.push(item.paint_type);
+            if (item.surface_type) parts.push(item.surface_type);
+            if (item.paint_manufacturer) parts.push(item.paint_manufacturer);
+            sub = parts.join(" · ");
+          } else if (tab === "white_refs") {
+            const parts = [];
+            if (item.customer) parts.push(item.customer);
+            if (item.led_info) parts.push(item.led_info);
+            sub = parts.join(" · ");
+          } else if (tab === "recipes") {
+            const parts = [];
+            if (item.thinner_pct) parts.push(`시너 ${item.thinner_pct}%`);
+            if (item.hardener_pct) parts.push(`경화제 ${item.hardener_pct}%`);
+            if (item.result_delta_E) parts.push(`ΔE: ${item.result_delta_E}`);
+            sub = parts.join(" · ");
+          }
+
+          // Lab 컬러
+          const hasLab = (item.solid_L_SCI != null || item.L_SCI != null);
+          const labL = item.solid_L_SCI ?? item.L_SCI;
+          const labA = item.solid_a_SCI ?? item.a_SCI;
+          const labB = item.solid_b_SCI ?? item.b_SCI;
+
+          return (
+            <div key={id} onClick={() => setDetailId(detailId === id ? null : id)}
+              style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: detailId === id ? "#eff6ff" : "#fff", border: detailId === id ? "1px solid #2563eb" : "1px solid #e5e7eb", borderRadius: 8, cursor: "pointer", transition: "all 0.15s" }}>
+
+              {hasLab && labL != null && labA != null && labB != null && (
+                <div style={{ width: 32, height: 32, borderRadius: 6, border: "1px solid #ccc", background: labToRgb(labL, labA, labB), flexShrink: 0 }} />
+              )}
+
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 600, fontSize: 14 }}>{name}</div>
+                {sub && <div style={{ fontSize: 11, color: "#888", marginTop: 1 }}>{sub}</div>}
+              </div>
+
+              {item.delta_SCI_SCE != null && (
+                <span style={{ fontSize: 11, color: "#dc2626", fontWeight: 600, whiteSpace: "nowrap" }}>ΔE {item.delta_SCI_SCE}</span>
+              )}
+
+              <div style={{ display: "flex", gap: 4, flexShrink: 0 }} onClick={e => e.stopPropagation()}>
+                <button onClick={() => openEditForm(item)} style={{ padding: "3px 8px", background: "#f59e0b", color: "#fff", border: "none", borderRadius: 4, fontSize: 11, cursor: "pointer" }}>수정</button>
+                <button onClick={() => handleDelete(id)} style={{ padding: "3px 8px", background: "#ef4444", color: "#fff", border: "none", borderRadius: 4, fontSize: 11, cursor: "pointer" }}>삭제</button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  // ============ 메인 렌더 ============
+  return (
+    <div style={{ maxWidth: 900, margin: "0 auto", padding: 16 }}>
+      {/* 헤더 */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <h1 style={{ fontSize: 22, fontWeight: 700 }}>마스터 데이터 관리</h1>
+        <button onClick={() => router.push("/")} style={{ padding: "6px 16px", background: "#6b7280", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13 }}>
+          ← 메인
+        </button>
+      </div>
+
+      {/* 탭 */}
+      <div style={{ display: "flex", gap: 4, marginBottom: 16, flexWrap: "wrap" }}>
+        {tabs.map(t => (
+          <button key={t.key} onClick={() => { setTab(t.key); resetForm(); setDetailId(null); }}
+            style={{ padding: "8px 16px", background: tab === t.key ? "#2563eb" : "#e5e7eb", color: tab === t.key ? "#fff" : "#333", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13, fontWeight: tab === t.key ? 700 : 400 }}>
+            {t.label} ({tab === t.key ? (
+              t.key === "inks" ? inks.length : t.key === "plates" ? plates.length :
+              t.key === "pads" ? pads.length : t.key === "base_colors" ? baseColors.length :
+              t.key === "white_refs" ? whiteRefs.length : recipes.length
+            ) : "..."})
           </button>
-        </div>
-      </header>
+        ))}
+      </div>
 
-      <main className="max-w-6xl mx-auto px-4 py-6">
-        {/* 탭 */}
-        <div className="flex gap-1 mb-4 bg-white rounded-lg p-1 border shadow-sm">
-          {(Object.keys(tabConfig) as TabType[]).map((key) => (
-            <button
-              key={key}
-              onClick={() => { setTab(key); setShowForm(false); }}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition ${
-                tab === key
-                  ? "bg-blue-600 text-white"
-                  : "text-gray-600 hover:bg-gray-100"
-              }`}
-            >
-              {tabConfig[key].label}
-              <span className="ml-1 text-xs opacity-70">
-                ({tab === key ? getData().length : ""})
-              </span>
-            </button>
-          ))}
-        </div>
+      {/* 추가 버튼 */}
+      <div style={{ marginBottom: 12 }}>
+        <button onClick={openNewForm} style={{ padding: "8px 20px", background: "#10b981", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
+          + 신규 등록
+        </button>
+      </div>
 
-        {/* 폼 */}
-        {showForm && renderForm()}
+      {/* 폼 */}
+      {renderForm()}
 
-        {/* 테이블 */}
-        <div className="bg-white rounded-lg border shadow-sm">
-          {renderTable()}
-        </div>
-      </main>
+      {/* 상세 */}
+      {renderDetail()}
+
+      {/* 목록 */}
+      {renderList()}
     </div>
   );
 }
