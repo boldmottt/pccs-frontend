@@ -219,25 +219,31 @@ export default function HomePage() {
         <div className="max-w-5xl mx-auto px-4 py-4 flex justify-between items-center">
           <h1 className="text-xl font-bold text-gray-800">
             PCCS{" "}
-            <span className="text-sm font-normal text-gray-500">v2.1</span>
+            <span className="text-sm font-normal text-gray-500">v2.2</span>
           </h1>
           <div className="flex gap-2">
-  <button
-    onClick={() => router.push("/master")}
-    className="bg-gray-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-gray-700"
-  >
-    마스터 관리
-  </button>
-  <button
-    onClick={() => setShowGroupInput(!showGroupInput)}
-    className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-700"
-  >
-    + 그룹 추가
-  </button>
-</div>
-
+            <button
+              onClick={() => router.push("/complementary")}
+              className="bg-purple-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-purple-700"
+            >
+              보색 추출
+            </button>
+            <button
+              onClick={() => router.push("/master")}
+              className="bg-gray-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-gray-700"
+            >
+              마스터 관리
+            </button>
+            <button
+              onClick={() => setShowGroupInput(!showGroupInput)}
+              className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-700"
+            >
+              + 그룹 추가
+            </button>
+          </div>
         </div>
       </header>
+
 
       <main className="max-w-5xl mx-auto px-4 py-6">
         {showGroupInput && (
