@@ -44,6 +44,31 @@ const emptyColor: NewColor = {
   manager: "",
 };
 
+// Lab → sRGB 변환 함수
+function labToRgb(L: number, a: number, b: number): string {
+  let y = (L + 16) / 116;
+  let x = a / 500 + y;
+  let z = y - b / 200;
+
+  x = x > 0.206897 ? x * x * x : (x - 16 / 116) / 7.787;
+  y = y > 0.206897 ? y * y * y : (y - 16 / 116) / 7.787;
+  z = z > 0.206897 ? z * z * z : (z - 16 / 116) / 7.787;
+
+  x *= 0.95047;
+  z *= 1.08883;
+
+  let r = x * 3.2406 + y * -1.5372 + z * -0.4986;
+  let g = x * -0.9689 + y * 1.8758 + z * 0.0415;
+  let bVal = x * 0.0557 + y * -0.204 + z * 1.057;
+
+  r = r > 0.0031308 ? 1.055 * Math.pow(r, 1 / 2.4) - 0.055 : 12.92 * r;
+  g = g > 0.0031308 ? 1.055 * Math.pow(g, 1 / 2.4) - 0.055 : 12.92 * g;
+  bVal = bVal > 0.0031308 ? 1.055 * Math.pow(bVal, 1 / 2.4) - 0.055 : 12.92 * bVal;
+
+  const clamp = (v: number) => Math.max(0, Math.min(255, Math.round(v * 255)));
+  return `rgb(${clamp(r)}, ${clamp(g)}, ${clamp(bVal)})`;
+}
+
 export default function HomePage() {
   const router = useRouter();
   const [groups, setGroups] = useState<Group[]>([]);
@@ -53,6 +78,10 @@ export default function HomePage() {
   const [showGroupInput, setShowGroupInput] = useState(false);
   const [showColorForm, setShowColorForm] = useState<number | null>(null);
   const [newColor, setNewColor] = useState<NewColor>({ ...emptyColor });
+
+  // 그룹 수정
+  const [editingGroupId, setEditingGroupId] = useState<number | null>(null);
+  const [editGroupName, setEditGroupName] = useState("");
 
   useEffect(() => {
     fetchData();
@@ -98,8 +127,33 @@ export default function HomePage() {
     }
   };
 
+  const startEditGroup = (group: Group) => {
+    setEditingGroupId(group.group_id);
+    setEditGroupName(group.group_name);
+  };
+
+  const saveEditGroup = async (groupId: number) => {
+    if (!editGroupName.trim()) return;
+    try {
+      await api.put(`/api/groups/${groupId}`, {
+        group_name: editGroupName.trim(),
+        sort_order: groups.find((g) => g.group_id === groupId)?.sort_order || 0,
+      });
+      setEditingGroupId(null);
+      setEditGroupName("");
+      fetchData();
+    } catch (err) {
+      console.error("그룹 수정 실패:", err);
+    }
+  };
+
   const deleteGroup = async (groupId: number) => {
-    if (!confirm("이 그룹을 삭제하시겠습니까?")) return;
+    const groupColors = colors.filter((c) => c.group_id === groupId);
+    const msg =
+      groupColors.length > 0
+        ? `이 그룹에 컬러 ${groupColors.length}건이 있습니다. 삭제하시겠습니까?\n(컬러는 미분류로 이동됩니다)`
+        : "이 그룹을 삭제하시겠습니까?";
+    if (!confirm(msg)) return;
     try {
       await api.delete(`/api/groups/${groupId}`);
       fetchData();
@@ -164,7 +218,8 @@ export default function HomePage() {
       <header className="bg-white shadow-sm border-b">
         <div className="max-w-5xl mx-auto px-4 py-4 flex justify-between items-center">
           <h1 className="text-xl font-bold text-gray-800">
-            PCCS <span className="text-sm font-normal text-gray-500">v2.1</span>
+            PCCS{" "}
+            <span className="text-sm font-normal text-gray-500">v2.1</span>
           </h1>
           <button
             onClick={() => setShowGroupInput(!showGroupInput)}
@@ -208,44 +263,88 @@ export default function HomePage() {
         {groups.map((group) => {
           const groupColors = getColorsForGroup(group.group_id);
           const isOpen = openGroupIds.has(group.group_id);
+          const isEditing = editingGroupId === group.group_id;
 
           return (
             <div key={group.group_id} className="mb-3">
               <div
                 className="bg-white rounded-lg shadow-sm border px-4 py-3 flex justify-between items-center cursor-pointer hover:bg-gray-50"
-                onClick={() => toggleGroup(group.group_id)}
+                onClick={() => {
+                  if (!isEditing) toggleGroup(group.group_id);
+                }}
               >
                 <div className="flex items-center gap-3">
                   <span className="text-gray-400 text-sm">
                     {isOpen ? "▼" : "▶"}
                   </span>
-                  <span className="font-semibold text-gray-800">
-                    {group.group_name}
-                  </span>
-                  <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">
-                    {groupColors.length}건
-                  </span>
+                  {isEditing ? (
+                    <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="text"
+                        value={editGroupName}
+                        onChange={(e) => setEditGroupName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") saveEditGroup(group.group_id);
+                          if (e.key === "Escape") setEditingGroupId(null);
+                        }}
+                        className="border rounded px-2 py-1 text-sm"
+                        autoFocus
+                      />
+                      <button
+                        onClick={() => saveEditGroup(group.group_id)}
+                        className="text-green-600 hover:text-green-800 text-sm font-medium"
+                      >
+                        저장
+                      </button>
+                      <button
+                        onClick={() => setEditingGroupId(null)}
+                        className="text-gray-400 hover:text-gray-600 text-sm"
+                      >
+                        취소
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <span className="font-semibold text-gray-800">
+                        {group.group_name}
+                      </span>
+                      <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">
+                        {groupColors.length}건
+                      </span>
+                    </>
+                  )}
                 </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      openColorForm(group.group_id);
-                    }}
-                    className="text-blue-600 hover:text-blue-800 text-sm font-medium"
-                  >
-                    + 컬러
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      deleteGroup(group.group_id);
-                    }}
-                    className="text-red-400 hover:text-red-600 text-sm"
-                  >
-                    삭제
-                  </button>
-                </div>
+                {!isEditing && (
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openColorForm(group.group_id);
+                      }}
+                      className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+                    >
+                      + 컬러
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        startEditGroup(group);
+                      }}
+                      className="text-gray-500 hover:text-gray-700 text-sm"
+                    >
+                      수정
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        deleteGroup(group.group_id);
+                      }}
+                      className="text-red-400 hover:text-red-600 text-sm"
+                    >
+                      삭제
+                    </button>
+                  </div>
+                )}
               </div>
 
               {showColorForm === group.group_id && (
@@ -381,7 +480,9 @@ export default function HomePage() {
                       <div
                         key={color.color_id}
                         className="bg-white rounded-lg border px-4 py-3 flex justify-between items-center hover:shadow-sm cursor-pointer"
-                        onClick={() => router.push(`/colors/${color.color_id}`)}
+                        onClick={() =>
+                          router.push(`/colors/${color.color_id}`)
+                        }
                       >
                         <div>
                           <span className="font-medium text-gray-800">
@@ -450,7 +551,9 @@ export default function HomePage() {
         {groups.length === 0 && ungroupedColors.length === 0 && (
           <div className="text-center py-20 text-gray-400">
             <p className="text-lg mb-2">아직 등록된 데이터가 없습니다.</p>
-            <p className="text-sm">위의 &quot;그룹 추가&quot; 버튼으로 시작하세요.</p>
+            <p className="text-sm">
+              위의 &quot;그룹 추가&quot; 버튼으로 시작하세요.
+            </p>
           </div>
         )}
       </main>

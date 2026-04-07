@@ -4,6 +4,63 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import api from "@/lib/api";
 
+// Lab → sRGB 변환
+function labToRgb(L: number, a: number, b: number): string {
+  let y = (L + 16) / 116;
+  let x = a / 500 + y;
+  let z = y - b / 200;
+
+  x = x > 0.206897 ? x * x * x : (x - 16 / 116) / 7.787;
+  y = y > 0.206897 ? y * y * y : (y - 16 / 116) / 7.787;
+  z = z > 0.206897 ? z * z * z : (z - 16 / 116) / 7.787;
+
+  x *= 0.95047;
+  z *= 1.08883;
+
+  let r = x * 3.2406 + y * -1.5372 + z * -0.4986;
+  let g = x * -0.9689 + y * 1.8758 + z * 0.0415;
+  let bVal = x * 0.0557 + y * -0.204 + z * 1.057;
+
+  r = r > 0.0031308 ? 1.055 * Math.pow(r, 1 / 2.4) - 0.055 : 12.92 * r;
+  g = g > 0.0031308 ? 1.055 * Math.pow(g, 1 / 2.4) - 0.055 : 12.92 * g;
+  bVal =
+    bVal > 0.0031308 ? 1.055 * Math.pow(bVal, 1 / 2.4) - 0.055 : 12.92 * bVal;
+
+  const clamp = (v: number) => Math.max(0, Math.min(255, Math.round(v * 255)));
+  return `rgb(${clamp(r)}, ${clamp(g)}, ${clamp(bVal)})`;
+}
+
+function ColorBox({
+  L,
+  a,
+  b,
+  label,
+}: {
+  L: number | null;
+  a: number | null;
+  b: number | null;
+  label: string;
+}) {
+  if (L === null || a === null || b === null) return null;
+  const color = labToRgb(L, a, b);
+  return (
+    <div className="flex flex-col items-center">
+      <div
+        className="w-14 h-14 rounded-lg border border-gray-300 shadow-sm"
+        style={{ backgroundColor: color }}
+        title={`L:${L} a:${a} b:${b}`}
+      />
+      <span className="text-[10px] text-gray-500 mt-1">{label}</span>
+    </div>
+  );
+}
+
+interface GroupData {
+  group_id: number;
+  group_name: string;
+  sort_order: number;
+}
+
 interface ColorDetail {
   color_id: number;
   group_id: number | null;
@@ -78,6 +135,21 @@ interface SampleFormData {
   note: string;
 }
 
+interface ColorEditForm {
+  color_name: string;
+  mode: string;
+  customer: string;
+  product: string;
+  paint_shop: string;
+  dev_stage: string;
+  manager: string;
+  status: string;
+  group_id: number | null;
+  target_L: number | null;
+  target_a: number | null;
+  target_b: number | null;
+}
+
 const emptySampleForm: SampleFormData = {
   recipe_name: "",
   ink_items: [{ ink_name: "", weight_g: 0 }],
@@ -98,18 +170,30 @@ export default function ColorDetailPage() {
   const colorId = Number(params.id);
 
   const [color, setColor] = useState<ColorDetail | null>(null);
+  const [groups, setGroups] = useState<GroupData[]>([]);
   const [rounds, setRounds] = useState<RoundData[]>([]);
-  const [samplesByRound, setSamplesByRound] = useState<Record<number, SampleData[]>>({});
+  const [samplesByRound, setSamplesByRound] = useState<
+    Record<number, SampleData[]>
+  >({});
   const [openRoundIds, setOpenRoundIds] = useState<Set<number>>(new Set());
+
+  // 컬러 수정
+  const [showColorEdit, setShowColorEdit] = useState(false);
+  const [colorEditForm, setColorEditForm] = useState<ColorEditForm | null>(
+    null
+  );
 
   // 샘플 추가/수정 폼
   const [showSampleForm, setShowSampleForm] = useState<number | null>(null);
   const [editingSampleId, setEditingSampleId] = useState<number | null>(null);
-  const [sampleForm, setSampleForm] = useState<SampleFormData>({ ...emptySampleForm });
+  const [sampleForm, setSampleForm] = useState<SampleFormData>({
+    ...emptySampleForm,
+  });
 
   useEffect(() => {
     fetchColor();
     fetchRounds();
+    fetchGroups();
   }, [colorId]);
 
   const fetchColor = async () => {
@@ -118,6 +202,15 @@ export default function ColorDetailPage() {
       setColor(res.data);
     } catch (err) {
       console.error("컬러 로드 실패:", err);
+    }
+  };
+
+  const fetchGroups = async () => {
+    try {
+      const res = await api.get("/api/groups/");
+      setGroups(res.data);
+    } catch (err) {
+      console.error("그룹 로드 실패:", err);
     }
   };
 
@@ -136,6 +229,40 @@ export default function ColorDetailPage() {
     }
   };
 
+  // 컬러 수정
+  const openColorEdit = () => {
+    if (!color) return;
+    setColorEditForm({
+      color_name: color.color_name,
+      mode: color.mode,
+      customer: color.customer || "",
+      product: color.product || "",
+      paint_shop: color.paint_shop || "",
+      dev_stage: color.dev_stage || "",
+      manager: color.manager || "",
+      status: color.status,
+      group_id: color.group_id,
+      target_L: color.target_L,
+      target_a: color.target_a,
+      target_b: color.target_b,
+    });
+    setShowColorEdit(true);
+  };
+
+  const saveColorEdit = async () => {
+    if (!colorEditForm) return;
+    try {
+      await api.put(`/api/colors/${colorId}`, {
+        ...colorEditForm,
+        color_name: colorEditForm.color_name.trim(),
+      });
+      setShowColorEdit(false);
+      fetchColor();
+    } catch (err) {
+      console.error("컬러 수정 실패:", err);
+    }
+  };
+
   const createRound = async () => {
     try {
       const nextNumber = rounds.length + 1;
@@ -150,7 +277,8 @@ export default function ColorDetailPage() {
   };
 
   const deleteRound = async (roundId: number) => {
-    if (!confirm("이 라운드를 삭제하시겠습니까? 포함된 샘플도 삭제됩니다.")) return;
+    if (!confirm("이 라운드를 삭제하시겠습니까? 포함된 샘플도 삭제됩니다."))
+      return;
     try {
       await api.delete(`/api/rounds/${roundId}`);
       fetchRounds();
@@ -168,7 +296,6 @@ export default function ColorDetailPage() {
     });
   };
 
-  // 잉크 항목 관리
   const addInkRow = () => {
     setSampleForm({
       ...sampleForm,
@@ -182,13 +309,16 @@ export default function ColorDetailPage() {
     setSampleForm({ ...sampleForm, ink_items: items });
   };
 
-  const updateInkRow = (index: number, field: string, value: string | number) => {
+  const updateInkRow = (
+    index: number,
+    field: string,
+    value: string | number
+  ) => {
     const items = [...sampleForm.ink_items];
     items[index] = { ...items[index], [field]: value };
     setSampleForm({ ...sampleForm, ink_items: items });
   };
 
-  // 새 샘플 폼 열기
   const openNewSampleForm = (roundId: number) => {
     setEditingSampleId(null);
     setSampleForm({ ...emptySampleForm });
@@ -198,14 +328,16 @@ export default function ColorDetailPage() {
     }
   };
 
-  // 수정 폼 열기
   const openEditSampleForm = (sample: SampleData) => {
     setEditingSampleId(sample.sample_id);
     setSampleForm({
       recipe_name: sample.recipe_name || "",
       ink_items:
         sample.ink_items && sample.ink_items.length > 0
-          ? sample.ink_items.map((i: any) => ({ ink_name: i.ink_name || "", weight_g: i.weight_g || 0 }))
+          ? sample.ink_items.map((i: any) => ({
+              ink_name: i.ink_name || "",
+              weight_g: i.weight_g || 0,
+            }))
           : [{ ink_name: "", weight_g: 0 }],
       thinner_pct: sample.thinner_pct || 0,
       hardener_pct: sample.hardener_pct || 0,
@@ -220,7 +352,6 @@ export default function ColorDetailPage() {
     setShowSampleForm(sample.round_id);
   };
 
-  // 샘플 저장 (생성 또는 수정)
   const saveSample = async (roundId: number) => {
     const payload = {
       round_id: roundId,
@@ -240,10 +371,8 @@ export default function ColorDetailPage() {
 
     try {
       if (editingSampleId) {
-        // 수정
         await api.put(`/api/samples/${editingSampleId}`, payload);
       } else {
-        // 새로 생성
         const samples = samplesByRound[roundId] || [];
         payload.sample_number = samples.length + 1;
         await api.post("/api/samples/", payload);
@@ -316,13 +445,28 @@ export default function ColorDetailPage() {
                 {color.mode === "translucency" ? "투광" : "매칭"}
               </span>
               <span className="text-xs">{statusLabel(color.status)}</span>
+              {/* 타겟 컬러 박스 */}
+              <ColorBox
+                L={color.target_L}
+                a={color.target_a}
+                b={color.target_b}
+                label="타겟"
+              />
             </div>
-            <button
-              onClick={createRound}
-              className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-700"
-            >
-              + 라운드 추가
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={openColorEdit}
+                className="bg-gray-500 text-white px-4 py-2 rounded-lg text-sm hover:bg-gray-600"
+              >
+                컬러 수정
+              </button>
+              <button
+                onClick={createRound}
+                className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-700"
+              >
+                + 라운드 추가
+              </button>
+            </div>
           </div>
           <div className="mt-2 text-xs text-gray-500 flex gap-4">
             <span>고객사: {color.customer || "-"}</span>
@@ -340,10 +484,241 @@ export default function ColorDetailPage() {
       </header>
 
       <main className="max-w-5xl mx-auto px-4 py-6">
+        {/* 컬러 수정 폼 */}
+        {showColorEdit && colorEditForm && (
+          <div className="mb-6 bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+            <h3 className="text-sm font-semibold text-yellow-800 mb-3">
+              컬러 정보 수정
+            </h3>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs text-gray-600 mb-1">
+                  컬러명 *
+                </label>
+                <input
+                  type="text"
+                  value={colorEditForm.color_name}
+                  onChange={(e) =>
+                    setColorEditForm({
+                      ...colorEditForm,
+                      color_name: e.target.value,
+                    })
+                  }
+                  className="w-full border rounded px-2 py-1.5 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-600 mb-1">
+                  그룹
+                </label>
+                <select
+                  value={colorEditForm.group_id ?? ""}
+                  onChange={(e) =>
+                    setColorEditForm({
+                      ...colorEditForm,
+                      group_id: e.target.value ? Number(e.target.value) : null,
+                    })
+                  }
+                  className="w-full border rounded px-2 py-1.5 text-sm"
+                >
+                  <option value="">미분류</option>
+                  {groups.map((g) => (
+                    <option key={g.group_id} value={g.group_id}>
+                      {g.group_name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-600 mb-1">모드</label>
+                <select
+                  value={colorEditForm.mode}
+                  onChange={(e) =>
+                    setColorEditForm({ ...colorEditForm, mode: e.target.value })
+                  }
+                  className="w-full border rounded px-2 py-1.5 text-sm"
+                >
+                  <option value="matching">컬러매칭</option>
+                  <option value="translucency">투광</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-600 mb-1">
+                  상태
+                </label>
+                <select
+                  value={colorEditForm.status}
+                  onChange={(e) =>
+                    setColorEditForm({
+                      ...colorEditForm,
+                      status: e.target.value,
+                    })
+                  }
+                  className="w-full border rounded px-2 py-1.5 text-sm"
+                >
+                  <option value="in_progress">진행중</option>
+                  <option value="confirmed">확정</option>
+                  <option value="hold">보류</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-600 mb-1">
+                  고객사
+                </label>
+                <input
+                  type="text"
+                  value={colorEditForm.customer}
+                  onChange={(e) =>
+                    setColorEditForm({
+                      ...colorEditForm,
+                      customer: e.target.value,
+                    })
+                  }
+                  className="w-full border rounded px-2 py-1.5 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-600 mb-1">제품</label>
+                <input
+                  type="text"
+                  value={colorEditForm.product}
+                  onChange={(e) =>
+                    setColorEditForm({
+                      ...colorEditForm,
+                      product: e.target.value,
+                    })
+                  }
+                  className="w-full border rounded px-2 py-1.5 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-600 mb-1">
+                  도료사
+                </label>
+                <input
+                  type="text"
+                  value={colorEditForm.paint_shop}
+                  onChange={(e) =>
+                    setColorEditForm({
+                      ...colorEditForm,
+                      paint_shop: e.target.value,
+                    })
+                  }
+                  className="w-full border rounded px-2 py-1.5 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-600 mb-1">
+                  개발단계
+                </label>
+                <input
+                  type="text"
+                  value={colorEditForm.dev_stage}
+                  onChange={(e) =>
+                    setColorEditForm({
+                      ...colorEditForm,
+                      dev_stage: e.target.value,
+                    })
+                  }
+                  className="w-full border rounded px-2 py-1.5 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-600 mb-1">
+                  담당자
+                </label>
+                <input
+                  type="text"
+                  value={colorEditForm.manager}
+                  onChange={(e) =>
+                    setColorEditForm({
+                      ...colorEditForm,
+                      manager: e.target.value,
+                    })
+                  }
+                  className="w-full border rounded px-2 py-1.5 text-sm"
+                />
+              </div>
+            </div>
+            {/* 타겟 Lab */}
+            <div className="mt-3">
+              <label className="text-xs text-gray-600 font-semibold block mb-1">
+                타겟 Lab (L* a* b*)
+              </label>
+              <div className="flex gap-2 items-center">
+                <input
+                  type="number"
+                  placeholder="L"
+                  value={colorEditForm.target_L ?? ""}
+                  onChange={(e) =>
+                    setColorEditForm({
+                      ...colorEditForm,
+                      target_L: e.target.value
+                        ? parseFloat(e.target.value)
+                        : null,
+                    })
+                  }
+                  className="w-24 border rounded px-2 py-1 text-sm"
+                />
+                <input
+                  type="number"
+                  placeholder="a"
+                  value={colorEditForm.target_a ?? ""}
+                  onChange={(e) =>
+                    setColorEditForm({
+                      ...colorEditForm,
+                      target_a: e.target.value
+                        ? parseFloat(e.target.value)
+                        : null,
+                    })
+                  }
+                  className="w-24 border rounded px-2 py-1 text-sm"
+                />
+                <input
+                  type="number"
+                  placeholder="b"
+                  value={colorEditForm.target_b ?? ""}
+                  onChange={(e) =>
+                    setColorEditForm({
+                      ...colorEditForm,
+                      target_b: e.target.value
+                        ? parseFloat(e.target.value)
+                        : null,
+                    })
+                  }
+                  className="w-24 border rounded px-2 py-1 text-sm"
+                />
+                <ColorBox
+                  L={colorEditForm.target_L}
+                  a={colorEditForm.target_a}
+                  b={colorEditForm.target_b}
+                  label="미리보기"
+                />
+              </div>
+            </div>
+            <div className="mt-3 flex gap-2 justify-end">
+              <button
+                onClick={() => setShowColorEdit(false)}
+                className="bg-gray-400 text-white px-3 py-1.5 rounded text-sm hover:bg-gray-500"
+              >
+                취소
+              </button>
+              <button
+                onClick={saveColorEdit}
+                className="bg-yellow-600 text-white px-3 py-1.5 rounded text-sm hover:bg-yellow-700"
+              >
+                저장
+              </button>
+            </div>
+          </div>
+        )}
+
         {rounds.length === 0 ? (
           <div className="text-center py-20 text-gray-400">
             <p className="text-lg mb-2">아직 라운드가 없습니다.</p>
-            <p className="text-sm">&quot;라운드 추가&quot; 버튼으로 시작하세요.</p>
+            <p className="text-sm">
+              &quot;라운드 추가&quot; 버튼으로 시작하세요.
+            </p>
           </div>
         ) : (
           rounds.map((round) => {
@@ -389,7 +764,7 @@ export default function ColorDetailPage() {
                   </div>
                 </div>
 
-                {/* 샘플 추가/수정 폼 */}
+                {/* 샘플 폼 */}
                 {showSampleForm === round.round_id && (
                   <div className="ml-6 mt-2 bg-green-50 border border-green-200 rounded-lg p-4">
                     <h3 className="text-sm font-semibold text-green-800 mb-3">
@@ -404,7 +779,10 @@ export default function ColorDetailPage() {
                         type="text"
                         value={sampleForm.recipe_name}
                         onChange={(e) =>
-                          setSampleForm({ ...sampleForm, recipe_name: e.target.value })
+                          setSampleForm({
+                            ...sampleForm,
+                            recipe_name: e.target.value,
+                          })
                         }
                         className="w-full border rounded px-2 py-1.5 text-sm"
                       />
@@ -438,7 +816,11 @@ export default function ColorDetailPage() {
                             placeholder="g"
                             value={item.weight_g || ""}
                             onChange={(e) =>
-                              updateInkRow(idx, "weight_g", parseFloat(e.target.value) || 0)
+                              updateInkRow(
+                                idx,
+                                "weight_g",
+                                parseFloat(e.target.value) || 0
+                              )
                             }
                             className="w-20 border rounded px-2 py-1 text-sm"
                           />
@@ -493,7 +875,7 @@ export default function ColorDetailPage() {
                       <label className="text-xs text-gray-600 font-semibold block mb-1">
                         베이스 측정 (L* a* b*)
                       </label>
-                      <div className="flex gap-2">
+                      <div className="flex gap-2 items-center">
                         <input
                           type="number"
                           placeholder="L"
@@ -501,7 +883,9 @@ export default function ColorDetailPage() {
                           onChange={(e) =>
                             setSampleForm({
                               ...sampleForm,
-                              base_L_SCI: e.target.value ? parseFloat(e.target.value) : null,
+                              base_L_SCI: e.target.value
+                                ? parseFloat(e.target.value)
+                                : null,
                             })
                           }
                           className="w-1/3 border rounded px-2 py-1 text-sm"
@@ -513,7 +897,9 @@ export default function ColorDetailPage() {
                           onChange={(e) =>
                             setSampleForm({
                               ...sampleForm,
-                              base_a_SCI: e.target.value ? parseFloat(e.target.value) : null,
+                              base_a_SCI: e.target.value
+                                ? parseFloat(e.target.value)
+                                : null,
                             })
                           }
                           className="w-1/3 border rounded px-2 py-1 text-sm"
@@ -525,10 +911,18 @@ export default function ColorDetailPage() {
                           onChange={(e) =>
                             setSampleForm({
                               ...sampleForm,
-                              base_b_SCI: e.target.value ? parseFloat(e.target.value) : null,
+                              base_b_SCI: e.target.value
+                                ? parseFloat(e.target.value)
+                                : null,
                             })
                           }
                           className="w-1/3 border rounded px-2 py-1 text-sm"
+                        />
+                        <ColorBox
+                          L={sampleForm.base_L_SCI}
+                          a={sampleForm.base_a_SCI}
+                          b={sampleForm.base_b_SCI}
+                          label="베이스"
                         />
                       </div>
                     </div>
@@ -537,7 +931,7 @@ export default function ColorDetailPage() {
                       <label className="text-xs text-gray-600 font-semibold block mb-1">
                         인쇄 측정 (L* a* b*)
                       </label>
-                      <div className="flex gap-2">
+                      <div className="flex gap-2 items-center">
                         <input
                           type="number"
                           placeholder="L"
@@ -545,7 +939,9 @@ export default function ColorDetailPage() {
                           onChange={(e) =>
                             setSampleForm({
                               ...sampleForm,
-                              print_L_SCI: e.target.value ? parseFloat(e.target.value) : null,
+                              print_L_SCI: e.target.value
+                                ? parseFloat(e.target.value)
+                                : null,
                             })
                           }
                           className="w-1/3 border rounded px-2 py-1 text-sm"
@@ -557,7 +953,9 @@ export default function ColorDetailPage() {
                           onChange={(e) =>
                             setSampleForm({
                               ...sampleForm,
-                              print_a_SCI: e.target.value ? parseFloat(e.target.value) : null,
+                              print_a_SCI: e.target.value
+                                ? parseFloat(e.target.value)
+                                : null,
                             })
                           }
                           className="w-1/3 border rounded px-2 py-1 text-sm"
@@ -569,16 +967,26 @@ export default function ColorDetailPage() {
                           onChange={(e) =>
                             setSampleForm({
                               ...sampleForm,
-                              print_b_SCI: e.target.value ? parseFloat(e.target.value) : null,
+                              print_b_SCI: e.target.value
+                                ? parseFloat(e.target.value)
+                                : null,
                             })
                           }
                           className="w-1/3 border rounded px-2 py-1 text-sm"
+                        />
+                        <ColorBox
+                          L={sampleForm.print_L_SCI}
+                          a={sampleForm.print_a_SCI}
+                          b={sampleForm.print_b_SCI}
+                          label="인쇄"
                         />
                       </div>
                     </div>
 
                     <div className="mb-3">
-                      <label className="block text-xs text-gray-600 mb-1">메모</label>
+                      <label className="block text-xs text-gray-600 mb-1">
+                        메모
+                      </label>
                       <input
                         type="text"
                         value={sampleForm.note}
@@ -609,7 +1017,8 @@ export default function ColorDetailPage() {
                 {/* 샘플 목록 */}
                 {isOpen && (
                   <div className="ml-6 mt-2 space-y-2">
-                    {samples.length === 0 && showSampleForm !== round.round_id ? (
+                    {samples.length === 0 &&
+                    showSampleForm !== round.round_id ? (
                       <p className="text-sm text-gray-400 py-2">
                         등록된 샘플이 없습니다.
                       </p>
@@ -620,20 +1029,33 @@ export default function ColorDetailPage() {
                           className="bg-white rounded-lg border px-4 py-3"
                         >
                           <div className="flex justify-between items-start">
-                            <div>
+                            <div className="flex items-center gap-2">
                               <span className="font-medium text-gray-800 text-sm">
                                 샘플 #{sample.sample_number}
                               </span>
                               {sample.recipe_name && (
-                                <span className="ml-2 text-xs text-gray-500">
+                                <span className="text-xs text-gray-500">
                                   {sample.recipe_name}
                                 </span>
                               )}
                               {sample.is_confirmed && (
-                                <span className="ml-2 text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded">
+                                <span className="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded">
                                   확정
                                 </span>
                               )}
+                              {/* 샘플 컬러 박스 */}
+                              <ColorBox
+                                L={sample.base_L_SCI}
+                                a={sample.base_a_SCI}
+                                b={sample.base_b_SCI}
+                                label="베이스"
+                              />
+                              <ColorBox
+                                L={sample.print_L_SCI}
+                                a={sample.print_a_SCI}
+                                b={sample.print_b_SCI}
+                                label="인쇄"
+                              />
                             </div>
                             <div className="flex items-center gap-2">
                               <button
@@ -657,12 +1079,15 @@ export default function ColorDetailPage() {
                               {sample.ink_items.map((i: any, idx: number) => (
                                 <span key={idx}>
                                   {i.ink_name} {i.weight_g}g
-                                  {idx < sample.ink_items!.length - 1 ? " + " : ""}
+                                  {idx < sample.ink_items!.length - 1
+                                    ? " + "
+                                    : ""}
                                 </span>
                               ))}
                               {sample.ink_total_g && (
                                 <span className="ml-2 text-gray-400">
-                                  (합계: {sample.ink_total_g}g / 총: {sample.total_weight_g}g)
+                                  (합계: {sample.ink_total_g}g / 총:{" "}
+                                  {sample.total_weight_g}g)
                                 </span>
                               )}
                             </div>
@@ -671,8 +1096,8 @@ export default function ColorDetailPage() {
                           {sample.print_L_SCI !== null && (
                             <div className="mt-2 flex gap-4 text-xs">
                               <span className="text-gray-500">
-                                인쇄 Lab: ({sample.print_L_SCI}, {sample.print_a_SCI},{" "}
-                                {sample.print_b_SCI})
+                                인쇄 Lab: ({sample.print_L_SCI},{" "}
+                                {sample.print_a_SCI}, {sample.print_b_SCI})
                               </span>
                               {sample.delta_E !== null && (
                                 <span className={deltaColor(sample.delta_E)}>
