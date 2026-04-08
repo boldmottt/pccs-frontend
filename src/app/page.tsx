@@ -223,6 +223,12 @@ export default function HomePage() {
           </h1>
           <div className="flex gap-2">
             <button
+              onClick={() => router.push("/dashboard")}
+              className="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-emerald-700"
+            >
+              대시보드
+            </button>
+            <button
               onClick={() => router.push("/complementary")}
               className="bg-purple-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-purple-700"
             >
@@ -243,6 +249,7 @@ export default function HomePage() {
           </div>
         </div>
       </header>
+
 
 
       <main className="max-w-5xl mx-auto px-4 py-6">
