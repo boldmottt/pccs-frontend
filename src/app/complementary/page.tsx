@@ -54,16 +54,17 @@ export default function ComplementaryPage() {
   const [L, setL] = useState<string>("");
   const [a, setA] = useState<string>("");
   const [b, setB] = useState<string>("");
-  const [method, setMethod] = useState<string>("hue_rotation");
+  const [method, setMethod] = useState<string>("chroma_only");
   const [targetLightness, setTargetLightness] = useState<string>("");
   const [topN, setTopN] = useState<string>("5");
   const [result, setResult] = useState<ComplementaryResult | null>(null);
   const [loading, setLoading] = useState(false);
-  const [methods] = useState<MethodInfo[]>([
-    { method: "hue_rotation", name: "색상환 회전 (권장)", description: "LCH 색공간에서 Hue를 180° 회전. 채도를 유지하면서 정확한 보색을 계산합니다." },
-    { method: "chroma_only", name: "색상 반전 (명도 유지)", description: "a*, b*만 반전하고 L*은 유지합니다." },
-    { method: "full", name: "완전 반전", description: "L*, a*, b* 모두 반전합니다." },
+  const  [methods] = useState<MethodInfo[]>([
+  { method: "chroma_only", name: "색상 반전 (명도 유지)", description: "a*, b*만 반전하고 L*은 유지합니다. 동일 밝기에서 보색을 찾습니다." },
+  { method: "full", name: "완전 반전", description: "L*, a*, b* 모두 반전합니다." },
+  { method: "neutral_target", name: "중성색 목표", description: "투광 후 무채색(L50,a0,b0)에 가까워지도록 보색을 계산합니다." },
   ]);
+
 
   // 3가지 방법 동시 비교
   const [compareResults, setCompareResults] = useState<ComplementaryResult[]>([]);
@@ -90,7 +91,7 @@ export default function ComplementaryPage() {
     if (!L || !a || !b) { alert("L*, a*, b* 값을 모두 입력하세요"); return; }
     setLoading(true);
     try {
-      const allMethods = ["hue_rotation", "chroma_only", "full"];
+      const allMethods = ["chroma_only", "full", "neutral_target"];
       const results = await Promise.all(
         allMethods.map(m => api.post("/api/complementary/calculate", {
           L: parseFloat(L), a: parseFloat(a), b: parseFloat(b),

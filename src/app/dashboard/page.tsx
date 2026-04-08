@@ -130,10 +130,9 @@ export default function DashboardPage() {
 
   // ΔE 바 차트 (컬러별)
   const deBarMax = colorBestDE.length > 0 ? Math.max(...colorBestDE.map(c => c.bestDE), 10) : 10;
-
   if (loading) {
     return (
-      <div style={{ maxWidth: 960, margin: "0 auto", padding: 16, textAlign: "center", paddingTop: 100 }}>
+      <div style={{ maxWidth: 960, margin: "0 auto", paddingLeft: 16, paddingRight: 16, paddingTop: 100, paddingBottom: 16, textAlign: "center" }}>
         <div style={{ fontSize: 18, color: "#666" }}>데이터 로딩 중...</div>
       </div>
     );
