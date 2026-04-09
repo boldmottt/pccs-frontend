@@ -3,6 +3,9 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import api from "@/lib/api";
+import OpacityGauge from "@/components/OpacityGauge";
+import InkDonutChart, { inkCategorySlices } from "@/components/InkDonutChart";
+import TransparencySimulator from "@/components/TransparencySimulator";
 
 function labToRgb(L: number, a: number, b: number): string {
   let y = (L + 16) / 116; let x = a / 500 + y; let z = y - b / 200;
@@ -19,7 +22,7 @@ function labToRgb(L: number, a: number, b: number): string {
   return `rgb(${clamp(r)},${clamp(g)},${clamp(bVal)})`;
 }
 
-interface Ink { ink_id: number; ink_name: string; ink_type?: string; solid_L_SCI?: number; solid_a_SCI?: number; solid_b_SCI?: number; solid_L_SCE?: number; solid_a_SCE?: number; solid_b_SCE?: number; gloss_GU?: number; manufacturer?: string; delta_SCI_SCE?: number; color_index?: string; viscosity?: number; density?: number; shelf_life_months?: number; memo?: string; }
+interface Ink { ink_id: number; ink_name: string; ink_type?: string; ink_category?: string; effect_type?: string; is_volatile?: boolean; affects_gloss?: boolean; residue_pct?: number; avg_opacity_score?: number; measurement_count?: number; solid_L_SCI?: number; solid_a_SCI?: number; solid_b_SCI?: number; solid_L_SCE?: number; solid_a_SCE?: number; solid_b_SCE?: number; gloss_GU?: number; manufacturer?: string; delta_SCI_SCE?: number; color_index?: string; viscosity?: number; density?: number; shelf_life_months?: number; memo?: string; }
 interface Plate { plate_id: number; plate_code?: string; plate_name?: string; etch_depth?: number; depth_measurement_density?: number; screen_ruling?: number; dot_density?: number; condition?: string; linked_pattern?: string; manufacturer?: string; material?: string; roller_diameter?: number; cell_volume?: number; memo?: string; }
 interface Pad { pad_id: number; pad_code?: string; hardness?: number; condition?: string; pad_shape?: string; pad_material?: string; diameter_mm?: number; tags?: string; memo?: string; }
 interface BaseColorType { base_color_id: number; base_color_name: string; color_code?: string; color_category?: string; paint_type?: string; thickness_um?: number; surface_type?: string; L_SCI?: number; a_SCI?: number; b_SCI?: number; L_SCE?: number; a_SCE?: number; b_SCE?: number; gloss_GU?: number; paint_manufacturer?: string; delta_SCI_SCE?: number; linked_pattern?: string; memo?: string; }
@@ -67,7 +70,7 @@ export default function MasterPage() {
 
   const openNewForm = () => {
     setEditId(null); setDetailId(null);
-    if (tab === "inks") setForm({ ink_name: "", ink_type: "color_ink", manufacturer: "", color_index: "", viscosity: "", density: "", shelf_life_months: "", solid_L_SCI: "", solid_a_SCI: "", solid_b_SCI: "", solid_L_SCE: "", solid_a_SCE: "", solid_b_SCE: "", gloss_GU: "", memo: "" });
+    if (tab === "inks") setForm({ ink_name: "", ink_type: "color_ink", ink_category: "color", effect_type: "", is_volatile: false, affects_gloss: false, residue_pct: "", manufacturer: "", color_index: "", viscosity: "", density: "", shelf_life_months: "", solid_L_SCI: "", solid_a_SCI: "", solid_b_SCI: "", solid_L_SCE: "", solid_a_SCE: "", solid_b_SCE: "", gloss_GU: "", memo: "" });
     else if (tab === "plates") setForm({ plate_code: "", plate_name: "", etch_depth: "", depth_measurement_density: "", screen_ruling: "", dot_density: "", condition: "", linked_pattern: "", manufacturer: "", material: "", roller_diameter: "", cell_volume: "", memo: "" });
     else if (tab === "pads") setForm({ pad_code: "", hardness: "", condition: "", pad_shape: "", pad_material: "", diameter_mm: "", tags: "", memo: "" });
     else if (tab === "base_colors") setForm({ base_color_name: "", color_code: "", color_category: "", paint_type: "", thickness_um: "", surface_type: "", L_SCI: "", a_SCI: "", b_SCI: "", L_SCE: "", a_SCE: "", b_SCE: "", gloss_GU: "", paint_manufacturer: "", linked_pattern: "", memo: "" });
@@ -88,10 +91,11 @@ export default function MasterPage() {
     const endpoint = tab === "inks" ? "/api/inks/" : tab === "plates" ? "/api/plates/" : tab === "pads" ? "/api/pads/" : tab === "base_colors" ? "/api/base-colors/" : tab === "white_refs" ? "/api/white-refs/" : "/api/recipes/";
     const payload: any = {};
     Object.keys(form).forEach(k => {
-      if (["registered_at", "updated_at", "delta_SCI_SCE", "ink_id", "plate_id", "pad_id", "base_color_id", "white_ref_id", "recipe_id", "ink_total_g", "thinner_g", "hardener_g", "total_weight_g", "result_delta_E"].includes(k)) return;
+      if (["registered_at", "updated_at", "delta_SCI_SCE", "ink_id", "plate_id", "pad_id", "base_color_id", "white_ref_id", "recipe_id", "ink_total_g", "thinner_g", "hardener_g", "total_weight_g", "result_delta_E", "avg_opacity_score", "measurement_count"].includes(k)) return;
       const v = form[k];
       if (v === "" || v === undefined) { payload[k] = null; return; }
-      if (["solid_L_SCI","solid_a_SCI","solid_b_SCI","solid_L_SCE","solid_a_SCE","solid_b_SCE","gloss_GU","viscosity","density","etch_depth","depth_measurement_density","screen_ruling","dot_density","roller_diameter","cell_volume","hardness","diameter_mm","L_SCI","a_SCI","b_SCI","L_SCE","a_SCE","b_SCE","thickness_um","thinner_pct","hardener_pct","result_L_SCI","result_a_SCI","result_b_SCI","result_L_SCE","result_a_SCE","result_b_SCE"].includes(k)) {
+      if (["is_volatile","affects_gloss"].includes(k)) { payload[k] = Boolean(v); return; }
+      if (["solid_L_SCI","solid_a_SCI","solid_b_SCI","solid_L_SCE","solid_a_SCE","solid_b_SCE","gloss_GU","viscosity","density","residue_pct","etch_depth","depth_measurement_density","screen_ruling","dot_density","roller_diameter","cell_volume","hardness","diameter_mm","L_SCI","a_SCI","b_SCI","L_SCE","a_SCE","b_SCE","thickness_um","thinner_pct","hardener_pct","result_L_SCI","result_a_SCI","result_b_SCI","result_L_SCE","result_a_SCE","result_b_SCE"].includes(k)) {
         payload[k] = v === null ? null : parseFloat(v);
       } else if (["shelf_life_months","linked_color_id","linked_sample_id"].includes(k)) {
         payload[k] = v === null ? null : parseInt(v);
@@ -152,13 +156,32 @@ export default function MasterPage() {
 
         {tab === "inks" && (<>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-            {renderField("잉크명 *", "ink_name")}{renderField("잉크타입", "ink_type", "select", ",color_ink,white_ink,clear_ink,special_ink")}
+            {renderField("잉크명 *", "ink_name")}
+            <div key="ink_category" style={{ marginBottom: 8 }}>
+              <label style={{ fontSize: 12, color: "#666", display: "block", marginBottom: 2 }}>카테고리</label>
+              <select value={form.ink_category || "color"} onChange={e => setForm({ ...form, ink_category: e.target.value })} style={{ width: "100%", padding: 6, border: "1px solid #ddd", borderRadius: 4, fontSize: 13 }}>
+                <option value="color">칼라</option>
+                <option value="transparent">희석제</option>
+                <option value="effect">이펙트</option>
+                <option value="additive">첨가제</option>
+              </select>
+            </div>
             {renderField("제조사", "manufacturer")}{renderField("CI번호", "color_index")}
             {renderField("점도", "viscosity", "number")}{renderField("비중", "density", "number")}
             {renderField("유효기간(월)", "shelf_life_months", "number")}{renderField("광택(GU)", "gloss_GU", "number")}
+            {form.ink_category === "effect" && renderField("이펙트 종류", "effect_type", "select", ",metallic,pearlescent,glitter,fluorescent,기타")}
+            {renderField("잔류물(%)", "residue_pct", "number")}
+          </div>
+          <div style={{ display: "flex", gap: 16, marginBottom: 8 }}>
+            <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
+              <input type="checkbox" checked={!!form.is_volatile} onChange={e => setForm({ ...form, is_volatile: e.target.checked })} /> 휘발성
+            </label>
+            <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
+              <input type="checkbox" checked={!!form.affects_gloss} onChange={e => setForm({ ...form, affects_gloss: e.target.checked })} /> 광택영향
+            </label>
           </div>
           <div style={{ marginTop: 8, padding: 8, background: "#f8f9fa", borderRadius: 6 }}>
-            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>SCI 측정값</div>
+            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>SCI 측정값 (솔리드)</div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
               {renderField("L*", "solid_L_SCI", "number")}{renderField("a*", "solid_a_SCI", "number")}{renderField("b*", "solid_b_SCI", "number")}
             </div>
@@ -342,6 +365,9 @@ export default function MasterPage() {
     </div>
   );
 
+  const CATEGORY_LABELS: Record<string, string> = { color: "칼라", transparent: "희석제", effect: "이펙트", additive: "첨가제" };
+  const CATEGORY_COLORS: Record<string, string> = { color: "#3b82f6", transparent: "#10b981", effect: "#8b5cf6", additive: "#f59e0b" };
+
   // ============ 일반 상세보기 ============
   const renderDetail = () => {
     if (detailId === null) return null;
@@ -354,7 +380,6 @@ export default function MasterPage() {
     else if (tab === "recipes") item = recipes.find(i => i.recipe_id === detailId);
     if (!item) return null;
 
-    // 확정레시피는 전용 상세보기
     if (tab === "recipes") return renderRecipeDetail(item);
 
     return (
@@ -366,6 +391,24 @@ export default function MasterPage() {
             <button onClick={() => setDetailId(null)} style={{ padding: "4px 12px", background: "#e5e7eb", border: "none", borderRadius: 4, fontSize: 12, cursor: "pointer" }}>닫기</button>
           </div>
         </div>
+
+        {/* 잉크 v5 시각화 */}
+        {tab === "inks" && (
+          <div style={{ marginBottom: 12, display: "flex", gap: 24, flexWrap: "wrap", alignItems: "flex-start" }}>
+            {item.avg_opacity_score != null || item.measurement_count > 0 ? (
+              <OpacityGauge score={item.avg_opacity_score} size={110} label="은폐력" />
+            ) : (
+              <div style={{ textAlign: "center" }}>
+                <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 4 }}>은폐력</div>
+                <div style={{ fontSize: 12, color: "#d1d5db" }}>측정 없음</div>
+              </div>
+            )}
+            {item.solid_L_SCI != null && (
+              <TransparencySimulator inkL={item.solid_L_SCI} inkA={item.solid_a_SCI ?? 0} inkB={item.solid_b_SCI ?? 0} opacityScore={item.avg_opacity_score ?? 80} showSlider label="투명도 시뮬레이션" />
+            )}
+          </div>
+        )}
+
         {(item.solid_L_SCI != null || item.L_SCI != null) && (
           <div style={{ marginBottom: 12, padding: 10, background: "#f8f9fa", borderRadius: 6 }}>
             <LabBox L={item.solid_L_SCI ?? item.L_SCI} a={item.solid_a_SCI ?? item.a_SCI} b={item.solid_b_SCI ?? item.b_SCI} label="SCI" />
@@ -399,7 +442,7 @@ export default function MasterPage() {
           const id = item.ink_id || item.plate_id || item.pad_id || item.base_color_id || item.white_ref_id || item.recipe_id;
           const name = item.ink_name || item.plate_name || item.plate_code || item.pad_code || item.base_color_name || item.ref_name || item.recipe_name || `#${id}`;
           let sub = "";
-          if (tab === "inks") sub = [item.ink_type, item.manufacturer, item.color_index && `CI: ${item.color_index}`, item.viscosity && `점도: ${item.viscosity}`].filter(Boolean).join(" · ");
+          if (tab === "inks") sub = [CATEGORY_LABELS[item.ink_category] || item.ink_category, item.manufacturer, item.color_index && `CI: ${item.color_index}`, item.avg_opacity_score != null && `은폐력 ${item.avg_opacity_score.toFixed(0)}%`].filter(Boolean).join(" · ");
           else if (tab === "plates") sub = [item.manufacturer, item.material, item.etch_depth && `심도: ${item.etch_depth}μm`, item.screen_ruling && `${item.screen_ruling}LPI`].filter(Boolean).join(" · ");
           else if (tab === "pads") sub = [item.hardness && `경도: ${item.hardness}`, item.pad_shape, item.pad_material, item.diameter_mm && `Ø${item.diameter_mm}mm`].filter(Boolean).join(" · ");
           else if (tab === "base_colors") sub = [item.color_code, item.color_category, item.paint_type, item.surface_type, item.paint_manufacturer].filter(Boolean).join(" · ");
@@ -470,6 +513,11 @@ export default function MasterPage() {
 
       {renderForm()}
       {renderDetail()}
+      {tab === "inks" && !filterText && inks.length > 0 && (
+        <div style={{ display: "flex", justifyContent: "center", marginBottom: 16 }}>
+          <InkDonutChart data={inkCategorySlices(inks.map(i => ({ ink_category: i.ink_category ?? "color" })))} title="잉크 구성" />
+        </div>
+      )}
       {renderList()}
     </div>
   );

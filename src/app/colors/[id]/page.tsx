@@ -3,26 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import api from "@/lib/api";
-
-// Lab → sRGB 변환
-function labToRgb(L: number, a: number, b: number): string {
-  let y = (L + 16) / 116;
-  let x = a / 500 + y;
-  let z = y - b / 200;
-  x = x > 0.206897 ? x * x * x : (x - 16 / 116) / 7.787;
-  y = y > 0.206897 ? y * y * y : (y - 16 / 116) / 7.787;
-  z = z > 0.206897 ? z * z * z : (z - 16 / 116) / 7.787;
-  x *= 0.95047;
-  z *= 1.08883;
-  let r = x * 3.2406 + y * -1.5372 + z * -0.4986;
-  let g = x * -0.9689 + y * 1.8758 + z * 0.0415;
-  let bVal = x * 0.0557 + y * -0.204 + z * 1.057;
-  r = r > 0.0031308 ? 1.055 * Math.pow(r, 1 / 2.4) - 0.055 : 12.92 * r;
-  g = g > 0.0031308 ? 1.055 * Math.pow(g, 1 / 2.4) - 0.055 : 12.92 * g;
-  bVal = bVal > 0.0031308 ? 1.055 * Math.pow(bVal, 1 / 2.4) - 0.055 : 12.92 * bVal;
-  const clamp = (v: number) => Math.max(0, Math.min(255, Math.round(v * 255)));
-  return `rgb(${clamp(r)}, ${clamp(g)}, ${clamp(bVal)})`;
-}
+import { labToRgb, deltaE2000 } from "@/lib/color";
 
 function ColorBox({ L, a, b, label }: { L: number | null; a: number | null; b: number | null; label: string }) {
   if (L === null || a === null || b === null) return null;
@@ -33,6 +14,16 @@ function ColorBox({ L, a, b, label }: { L: number | null; a: number | null; b: n
       <span className="text-[10px] text-gray-500 mt-1">{label}</span>
     </div>
   );
+}
+
+/** 분광기 출력 "L a b" 또는 "L\ta\tb" 또는 "L,a,b" 파싱 */
+function parseLabFromClipboard(text: string): [number, number, number] | null {
+  const parts = text.trim().split(/[\s,\t]+/);
+  if (parts.length >= 3) {
+    const nums = parts.slice(0, 3).map(Number);
+    if (nums.every(n => !isNaN(n) && isFinite(n))) return nums as [number, number, number];
+  }
+  return null;
 }
 
 interface GroupData { group_id: number; group_name: string; sort_order: number; }
@@ -66,6 +57,11 @@ export default function ColorDetailPage() {
   const [showSampleForm, setShowSampleForm] = useState<number | null>(null);
   const [editingSampleId, setEditingSampleId] = useState<number | null>(null);
   const [sampleForm, setSampleForm] = useState<SampleFormData>({ ...emptySampleForm });
+
+  // 테이블 뷰 토글
+  const [tableViewRounds, setTableViewRounds] = useState<Set<number>>(new Set());
+  // 복제 원본 표시용
+  const [duplicatedFrom, setDuplicatedFrom] = useState<string | null>(null);
 
   // 추천
   const [showRecommend, setShowRecommend] = useState(false);
@@ -106,8 +102,11 @@ export default function ColorDetailPage() {
     try {
       const res = await api.get(`/api/rounds/?color_id=${colorId}`);
       setRounds(res.data);
+      const sampleResponses = await Promise.all(
+        res.data.map((r: RoundData) => api.get(`/api/samples/?round_id=${r.round_id}`))
+      );
       const samplesMap: Record<number, SampleData[]> = {};
-      for (const r of res.data) { const sRes = await api.get(`/api/samples/?round_id=${r.round_id}`); samplesMap[r.round_id] = sRes.data; }
+      res.data.forEach((r: RoundData, i: number) => { samplesMap[r.round_id] = sampleResponses[i].data; });
       setSamplesByRound(samplesMap);
     } catch (err) { console.error("라운드 로드 실패:", err); }
   };
@@ -191,15 +190,17 @@ export default function ColorDetailPage() {
     setActiveInkIdx(null);
   };
 
-  const openNewSampleForm = (roundId: number) => { setEditingSampleId(null); setSampleForm({ ...emptySampleForm }); setShowSampleForm(roundId); if (!openRoundIds.has(roundId)) { setOpenRoundIds((prev) => new Set(prev).add(roundId)); } };
+  const openNewSampleForm = (roundId: number) => { setEditingSampleId(null); setDuplicatedFrom(null); setSampleForm({ ...emptySampleForm }); setShowSampleForm(roundId); if (!openRoundIds.has(roundId)) { setOpenRoundIds((prev) => new Set(prev).add(roundId)); } };
   const openEditSampleForm = (sample: SampleData) => {
     setEditingSampleId(sample.sample_id);
+    setDuplicatedFrom(null);
     setSampleForm({ recipe_name: sample.recipe_name || "", ink_items: sample.ink_items && sample.ink_items.length > 0 ? sample.ink_items.map((i: any) => ({ ink_name: i.ink_name || "", weight_g: i.weight_g || 0 })) : [{ ink_name: "", weight_g: 0 }], thinner_pct: sample.thinner_pct || 0, hardener_pct: sample.hardener_pct || 0, base_L_SCI: sample.base_L_SCI, base_a_SCI: sample.base_a_SCI, base_b_SCI: sample.base_b_SCI, print_L_SCI: sample.print_L_SCI, print_a_SCI: sample.print_a_SCI, print_b_SCI: sample.print_b_SCI, note: sample.note || "" });
     setShowSampleForm(sample.round_id);
   };
 
   const applyRecommendation = (rec: Recommendation, roundId: number) => {
     setEditingSampleId(null);
+    setDuplicatedFrom(null);
     setSampleForm({ recipe_name: rec.recipe_name || "추천 레시피", ink_items: rec.ink_items && rec.ink_items.length > 0 ? rec.ink_items.map((i: any) => ({ ink_name: i.ink_name || "", weight_g: i.weight_g || 0 })) : [{ ink_name: "", weight_g: 0 }], thinner_pct: rec.thinner_pct || 0, hardener_pct: rec.hardener_pct || 0, base_L_SCI: null, base_a_SCI: null, base_b_SCI: null, print_L_SCI: null, print_a_SCI: null, print_b_SCI: null, note: `추천 적용 (원본 ΔE: ${rec.delta_E_to_target})` });
     setShowSampleForm(roundId); setShowRecommend(false);
   };
@@ -209,17 +210,149 @@ export default function ColorDetailPage() {
     try {
       if (editingSampleId) { await api.put(`/api/samples/${editingSampleId}`, payload); }
       else { const samples = samplesByRound[roundId] || []; payload.sample_number = samples.length + 1; await api.post("/api/samples/", payload); }
-      setShowSampleForm(null); setEditingSampleId(null); setSampleForm({ ...emptySampleForm }); fetchRounds();
+      setShowSampleForm(null); setEditingSampleId(null); setDuplicatedFrom(null); setSampleForm({ ...emptySampleForm }); fetchRounds();
     } catch (err) { console.error("샘플 저장 실패:", err); }
   };
 
   const deleteSample = async (sampleId: number) => { if (!confirm("이 샘플을 삭제하시겠습니까?")) return; try { await api.delete(`/api/samples/${sampleId}`); fetchRounds(); } catch (err) { console.error("샘플 삭제 실패:", err); } };
-  const cancelForm = () => { setShowSampleForm(null); setEditingSampleId(null); setSampleForm({ ...emptySampleForm }); };
+  const cancelForm = () => { setShowSampleForm(null); setEditingSampleId(null); setDuplicatedFrom(null); setSampleForm({ ...emptySampleForm }); };
 
   const statusLabel = (s: string) => { switch (s) { case "confirmed": return "✅ 확정"; case "in_progress": return "🔄 진행중"; case "hold": return "⏸ 보류"; default: return s; } };
   const deltaColor = (v: number | null) => { if (v === null) return "text-gray-400"; if (v <= 1.0) return "text-green-600 font-bold"; if (v <= 3.0) return "text-yellow-600 font-bold"; return "text-red-600 font-bold"; };
+  const deltaColorHex = (v: number | null): string => { if (v === null) return "#9ca3af"; if (v <= 1.0) return "#16a34a"; if (v <= 3.0) return "#ca8a04"; return "#dc2626"; };
   const methodLabel = (m: string) => m === "chroma_only" ? "색상 반전 (명도 유지)" : m === "full" ? "완전 반전" : "중성색 목표";
 
+  // ===== 새 기능: 샘플 복제 =====
+  const duplicateSample = (sample: SampleData, roundId: number) => {
+    setEditingSampleId(null);
+    setDuplicatedFrom(`S#${sample.sample_number} ${sample.recipe_name || ""}`);
+    setSampleForm({
+      recipe_name: sample.recipe_name || "",
+      ink_items: sample.ink_items && sample.ink_items.length > 0
+        ? sample.ink_items.map((i: any) => ({ ink_name: i.ink_name || "", weight_g: i.weight_g || 0 }))
+        : [{ ink_name: "", weight_g: 0 }],
+      thinner_pct: sample.thinner_pct || 0,
+      hardener_pct: sample.hardener_pct || 0,
+      base_L_SCI: sample.base_L_SCI,
+      base_a_SCI: sample.base_a_SCI,
+      base_b_SCI: sample.base_b_SCI,
+      print_L_SCI: null,  // 새로 측정
+      print_a_SCI: null,
+      print_b_SCI: null,
+      note: "",
+    });
+    setShowSampleForm(roundId);
+    if (!openRoundIds.has(roundId)) {
+      setOpenRoundIds(prev => new Set(prev).add(roundId));
+    }
+  };
+
+  // 이전 샘플 기반 신규 (라운드 내 또는 전체에서 마지막 샘플)
+  const openNewFromPrevious = (roundId: number) => {
+    const roundSamples = samplesByRound[roundId] || [];
+    let lastSample: SampleData | null = null;
+    if (roundSamples.length > 0) {
+      lastSample = roundSamples[roundSamples.length - 1];
+    } else {
+      // 다른 라운드의 마지막 샘플
+      for (let i = rounds.length - 1; i >= 0; i--) {
+        const s = samplesByRound[rounds[i].round_id] || [];
+        if (s.length > 0) { lastSample = s[s.length - 1]; break; }
+      }
+    }
+    if (lastSample) {
+      duplicateSample(lastSample, roundId);
+    } else {
+      openNewSampleForm(roundId);
+    }
+  };
+
+  // ===== 새 기능: Lab 붙여넣기 =====
+  const handleBasePaste = (e: React.ClipboardEvent) => {
+    const parsed = parseLabFromClipboard(e.clipboardData.getData("text"));
+    if (parsed) {
+      e.preventDefault();
+      setSampleForm(prev => ({ ...prev, base_L_SCI: parsed[0], base_a_SCI: parsed[1], base_b_SCI: parsed[2] }));
+    }
+  };
+  const handlePrintPaste = (e: React.ClipboardEvent) => {
+    const parsed = parseLabFromClipboard(e.clipboardData.getData("text"));
+    if (parsed) {
+      e.preventDefault();
+      setSampleForm(prev => ({ ...prev, print_L_SCI: parsed[0], print_a_SCI: parsed[1], print_b_SCI: parsed[2] }));
+    }
+  };
+  const handleTargetPaste = (e: React.ClipboardEvent) => {
+    const parsed = parseLabFromClipboard(e.clipboardData.getData("text"));
+    if (parsed) {
+      e.preventDefault();
+      if (colorEditForm) {
+        setColorEditForm({ ...colorEditForm, target_L: parsed[0], target_a: parsed[1], target_b: parsed[2] });
+      }
+    }
+  };
+
+  // 테이블/카드 뷰 토글
+  const toggleTableView = (roundId: number) => {
+    setTableViewRounds(prev => {
+      const next = new Set(prev);
+      if (next.has(roundId)) next.delete(roundId);
+      else next.add(roundId);
+      return next;
+    });
+  };
+
+  // ===== 계산된 값들 =====
+  // 전체 샘플 (모든 라운드)
+  const allSamplesFlat = rounds.flatMap(r =>
+    (samplesByRound[r.round_id] || []).map(s => ({ ...s, round_number: r.round_number }))
+  );
+
+  // 최신 인쇄 측정 샘플
+  const latestPrintSample = [...allSamplesFlat]
+    .filter(s => s.print_L_SCI !== null)
+    .sort((a, b) => b.sample_id - a.sample_id)[0] || null;
+
+  // ΔE 추이 (시간순)
+  const deltaETrend = allSamplesFlat
+    .filter(s => s.delta_E !== null)
+    .sort((a, b) => a.sample_id - b.sample_id)
+    .map(s => ({ id: s.sample_id, num: s.sample_number, round: s.round_number, deltaE: s.delta_E!, dL: s.delta_L, da: s.delta_a, db: s.delta_b }));
+
+  // 최소 ΔE (전체 best)
+  const bestOverall = deltaETrend.length > 0
+    ? deltaETrend.reduce((a, b) => a.deltaE < b.deltaE ? a : b) : null;
+
+  // 이 컬러에서 사용한 잉크 목록 (빈도순)
+  const recentlyUsedInks: string[] = (() => {
+    const inkMap = new Map<string, number>();
+    allSamplesFlat.forEach(s => {
+      if (s.ink_items) {
+        s.ink_items.forEach((item: any) => {
+          if (item.ink_name) inkMap.set(item.ink_name, (inkMap.get(item.ink_name) || 0) + 1);
+        });
+      }
+    });
+    return [...inkMap.entries()].sort((a, b) => b[1] - a[1]).map(([name]) => name);
+  })();
+
+  // 실시간 ΔE 미리 계산
+  const previewDeltaE = (() => {
+    if (!color || color.target_L === null || color.target_a === null || color.target_b === null) return null;
+    if (sampleForm.print_L_SCI === null || sampleForm.print_a_SCI === null || sampleForm.print_b_SCI === null) return null;
+    return deltaE2000(color.target_L, color.target_a, color.target_b, sampleForm.print_L_SCI, sampleForm.print_a_SCI, sampleForm.print_b_SCI);
+  })();
+
+  // 조정 가이드 텍스트
+  const getAdjustGuide = (dL: number | null, da: number | null, db: number | null): string[] => {
+    const guides: string[] = [];
+    if (dL === null || da === null || db === null) return guides;
+    const abs = (v: number) => Math.abs(v);
+    if (abs(dL) >= 0.5) guides.push(dL > 0 ? `L +${dL.toFixed(1)} (밝음→어둡게)` : `L ${dL.toFixed(1)} (어두움→밝게)`);
+    if (abs(da) >= 0.3) guides.push(da > 0 ? `a +${da.toFixed(1)} (적→녹 방향)` : `a ${da.toFixed(1)} (녹→적 방향)`);
+    if (abs(db) >= 0.3) guides.push(db > 0 ? `b +${db.toFixed(1)} (황→청 방향)` : `b ${db.toFixed(1)} (청→황 방향)`);
+    return guides;
+  };
 
   if (!color) return <div className="p-8 text-center text-gray-400">로딩 중...</div>;
 
@@ -265,6 +398,90 @@ export default function ColorDetailPage() {
       </header>
 
       <main className="max-w-5xl mx-auto px-4 py-6">
+
+        {/* ===== 타겟 vs 현재 상시 비교 위젯 ===== */}
+        {color.target_L !== null && color.target_a !== null && color.target_b !== null && (
+          <div className="mb-6 bg-white rounded-lg border shadow-sm p-4">
+            <div className="flex items-center gap-6 flex-wrap">
+              {/* 타겟 스와치 */}
+              <div className="text-center flex-shrink-0">
+                <div className="w-16 h-16 rounded-lg border-2 border-gray-300 shadow-sm mx-auto" style={{ backgroundColor: labToRgb(color.target_L!, color.target_a!, color.target_b!) }} />
+                <div className="text-xs font-medium mt-1">타겟</div>
+                <div className="text-[10px] text-gray-500">L:{color.target_L} a:{color.target_a} b:{color.target_b}</div>
+              </div>
+
+              <div className="text-2xl text-gray-300 flex-shrink-0">→</div>
+
+              {/* 최신 인쇄 스와치 */}
+              {latestPrintSample ? (
+                <div className="text-center flex-shrink-0">
+                  <div className="w-16 h-16 rounded-lg border-2 shadow-sm mx-auto" style={{
+                    backgroundColor: labToRgb(latestPrintSample.print_L_SCI!, latestPrintSample.print_a_SCI!, latestPrintSample.print_b_SCI!),
+                    borderColor: deltaColorHex(latestPrintSample.delta_E)
+                  }} />
+                  <div className="text-xs font-medium mt-1">최신 S#{latestPrintSample.sample_number}</div>
+                  <div className="text-[10px] text-gray-500">L:{latestPrintSample.print_L_SCI} a:{latestPrintSample.print_a_SCI} b:{latestPrintSample.print_b_SCI}</div>
+                </div>
+              ) : (
+                <div className="text-center text-gray-400 text-sm flex-shrink-0">측정값 없음</div>
+              )}
+
+              {/* ΔE + 방향 */}
+              {latestPrintSample?.delta_E !== null && latestPrintSample && (
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-2xl font-bold" style={{ color: deltaColorHex(latestPrintSample.delta_E) }}>
+                      ΔE = {latestPrintSample.delta_E}
+                    </span>
+                    {latestPrintSample.delta_E !== null && latestPrintSample.delta_E <= 1.0 && <span className="text-xs text-green-600 bg-green-50 px-2 py-0.5 rounded">우수</span>}
+                    {latestPrintSample.delta_E !== null && latestPrintSample.delta_E > 1.0 && latestPrintSample.delta_E <= 3.0 && <span className="text-xs text-yellow-600 bg-yellow-50 px-2 py-0.5 rounded">양호</span>}
+                    {latestPrintSample.delta_E !== null && latestPrintSample.delta_E > 3.0 && <span className="text-xs text-red-600 bg-red-50 px-2 py-0.5 rounded">조정 필요</span>}
+                  </div>
+                  <div className="mt-1.5 flex gap-3 text-xs">
+                    <span className={latestPrintSample.delta_L !== null && Math.abs(latestPrintSample.delta_L) >= 0.5 ? "font-semibold text-gray-800" : "text-gray-500"}>
+                      ΔL: {latestPrintSample.delta_L !== null ? (latestPrintSample.delta_L > 0 ? "+" : "") + latestPrintSample.delta_L.toFixed(2) : "-"} {latestPrintSample.delta_L !== null && (latestPrintSample.delta_L > 0 ? "↑" : latestPrintSample.delta_L < 0 ? "↓" : "")}
+                    </span>
+                    <span className={latestPrintSample.delta_a !== null && Math.abs(latestPrintSample.delta_a) >= 0.3 ? "font-semibold text-gray-800" : "text-gray-500"}>
+                      Δa: {latestPrintSample.delta_a !== null ? (latestPrintSample.delta_a > 0 ? "+" : "") + latestPrintSample.delta_a.toFixed(2) : "-"} {latestPrintSample.delta_a !== null && (latestPrintSample.delta_a > 0 ? "↑" : latestPrintSample.delta_a < 0 ? "↓" : "")}
+                    </span>
+                    <span className={latestPrintSample.delta_b !== null && Math.abs(latestPrintSample.delta_b) >= 0.3 ? "font-semibold text-gray-800" : "text-gray-500"}>
+                      Δb: {latestPrintSample.delta_b !== null ? (latestPrintSample.delta_b > 0 ? "+" : "") + latestPrintSample.delta_b.toFixed(2) : "-"} {latestPrintSample.delta_b !== null && (latestPrintSample.delta_b > 0 ? "↑" : latestPrintSample.delta_b < 0 ? "↓" : "")}
+                    </span>
+                  </div>
+                  {/* 조정 가이드 */}
+                  {getAdjustGuide(latestPrintSample.delta_L, latestPrintSample.delta_a, latestPrintSample.delta_b).length > 0 && (
+                    <div className="mt-1.5 text-[11px] text-blue-600 bg-blue-50 px-2 py-1 rounded">
+                      조정: {getAdjustGuide(latestPrintSample.delta_L, latestPrintSample.delta_a, latestPrintSample.delta_b).join(" / ")}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ΔE 추이 */}
+              {deltaETrend.length > 1 && (
+                <div className="text-right flex-shrink-0 min-w-[140px]">
+                  <div className="text-xs text-gray-500 mb-1">ΔE 추이 ({deltaETrend.length}건)</div>
+                  <div className="flex items-center gap-1 justify-end flex-wrap">
+                    {deltaETrend.slice(-5).map((t, i, arr) => (
+                      <span key={t.id} className="text-xs">
+                        <span className="font-mono" style={{ color: deltaColorHex(t.deltaE) }}>{t.deltaE.toFixed(1)}</span>
+                        {i < arr.length - 1 && <span className="text-gray-300 mx-0.5">→</span>}
+                      </span>
+                    ))}
+                  </div>
+                  {deltaETrend.length >= 2 && (
+                    <div className={`text-xs mt-1 ${
+                      deltaETrend[deltaETrend.length - 1].deltaE < deltaETrend[0].deltaE ? "text-green-600" : "text-red-500"
+                    }`}>
+                      {deltaETrend[deltaETrend.length - 1].deltaE < deltaETrend[0].deltaE ? "📉 개선 중" : "📈 주의"}
+                      {bestOverall && <span className="text-gray-400 ml-1">(최소: {bestOverall.deltaE})</span>}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* ===== 보색 분석 패널 ===== */}
         {showComplementary && (
@@ -323,7 +540,6 @@ export default function ColorDetailPage() {
                         {compMethod === "chroma_only" && "a*, b*만 반전하고 L*(명도)은 유지합니다. 동일 밝기에서 보색 잉크를 찾을 때 사용합니다."}
                         {compMethod === "full" && "L*, a*, b* 모두 반전합니다. 밝은 소재→어두운 보색, 어두운 소재→밝은 보색."}
                         {compMethod === "neutral_target" && "투광 후 무채색(L50,a0,b0)에 가까워지도록 계산합니다. 색 왜곡 최소화 목적."}
-
                       </div>
                     </div>
 
@@ -477,12 +693,13 @@ export default function ColorDetailPage() {
               <div><label className="block text-xs text-gray-600 mb-1">담당자</label><input type="text" value={colorEditForm.manager} onChange={(e) => setColorEditForm({ ...colorEditForm, manager: e.target.value })} className="w-full border rounded px-2 py-1.5 text-sm" /></div>
             </div>
             <div className="mt-3">
-              <label className="text-xs text-gray-600 font-semibold block mb-1">타겟 Lab (L* a* b*)</label>
+              <label className="text-xs text-gray-600 font-semibold block mb-1">타겟 Lab (L* a* b*) — 붙여넣기 지원</label>
               <div className="flex gap-2 items-center">
-                <input type="number" placeholder="L" value={colorEditForm.target_L ?? ""} onChange={(e) => setColorEditForm({ ...colorEditForm, target_L: e.target.value ? parseFloat(e.target.value) : null })} className="w-24 border rounded px-2 py-1 text-sm" />
+                <input type="number" placeholder="L" value={colorEditForm.target_L ?? ""} onChange={(e) => setColorEditForm({ ...colorEditForm, target_L: e.target.value ? parseFloat(e.target.value) : null })} onPaste={handleTargetPaste} className="w-24 border rounded px-2 py-1 text-sm" />
                 <input type="number" placeholder="a" value={colorEditForm.target_a ?? ""} onChange={(e) => setColorEditForm({ ...colorEditForm, target_a: e.target.value ? parseFloat(e.target.value) : null })} className="w-24 border rounded px-2 py-1 text-sm" />
                 <input type="number" placeholder="b" value={colorEditForm.target_b ?? ""} onChange={(e) => setColorEditForm({ ...colorEditForm, target_b: e.target.value ? parseFloat(e.target.value) : null })} className="w-24 border rounded px-2 py-1 text-sm" />
                 <ColorBox L={colorEditForm.target_L} a={colorEditForm.target_a} b={colorEditForm.target_b} label="미리보기" />
+                <span className="text-[10px] text-gray-400">L 필드에 &quot;85.2 -3.1 12.4&quot; 붙여넣기 가능</span>
               </div>
             </div>
             <div className="mt-3 flex gap-2 justify-end">
@@ -502,6 +719,8 @@ export default function ColorDetailPage() {
           rounds.map((round) => {
             const samples = samplesByRound[round.round_id] || [];
             const isOpen = openRoundIds.has(round.round_id);
+            const isTableView = tableViewRounds.has(round.round_id);
+            const bestInRound = samples.filter(s => s.delta_E !== null).sort((a, b) => a.delta_E! - b.delta_E!)[0] || null;
             return (
               <div key={round.round_id} className="mb-4">
                 <div className="bg-white rounded-lg shadow-sm border px-4 py-3 flex justify-between items-center cursor-pointer hover:bg-gray-50" onClick={() => toggleRound(round.round_id)}>
@@ -509,70 +728,124 @@ export default function ColorDetailPage() {
                     <span className="text-gray-400 text-sm">{isOpen ? "▼" : "▶"}</span>
                     <span className="font-semibold text-gray-800">라운드 {round.round_number}</span>
                     <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">샘플 {samples.length}건</span>
+                    {bestInRound && <span className={`text-xs ${deltaColor(bestInRound.delta_E)}`}>최소 ΔE: {bestInRound.delta_E}</span>}
                   </div>
-                  <div className="flex items-center gap-2">
-                    <button onClick={(e) => { e.stopPropagation(); openNewSampleForm(round.round_id); }} className="text-blue-600 hover:text-blue-800 text-sm font-medium">+ 샘플</button>
-                    <button onClick={(e) => { e.stopPropagation(); deleteRound(round.round_id); }} className="text-red-400 hover:text-red-600 text-sm">삭제</button>
+                  <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                    <button onClick={() => openNewSampleForm(round.round_id)} className="text-blue-600 hover:text-blue-800 text-sm font-medium">+ 빈 샘플</button>
+                    <button onClick={() => openNewFromPrevious(round.round_id)} className="text-indigo-600 hover:text-indigo-800 text-sm font-medium" title="이전 샘플의 레시피를 복사하여 새 샘플 생성">📋 이전 기반</button>
+                    {samples.length > 0 && isOpen && (
+                      <button onClick={() => toggleTableView(round.round_id)} className="text-gray-500 hover:text-gray-700 text-xs border px-2 py-0.5 rounded">
+                        {isTableView ? "카드 뷰" : "테이블 뷰"}
+                      </button>
+                    )}
+                    <button onClick={() => deleteRound(round.round_id)} className="text-red-400 hover:text-red-600 text-sm">삭제</button>
                   </div>
                 </div>
 
+                {/* 샘플 입력 폼 */}
                 {showSampleForm === round.round_id && (
                   <div className="ml-6 mt-2 bg-green-50 border border-green-200 rounded-lg p-4">
-                    <h3 className="text-sm font-semibold text-green-800 mb-3">{editingSampleId ? "샘플 수정" : "새 샘플 등록"}</h3>
-                    <div className="mb-3"><label className="block text-xs text-gray-600 mb-1">레시피명</label><input type="text" value={sampleForm.recipe_name} onChange={(e) => setSampleForm({ ...sampleForm, recipe_name: e.target.value })} className="w-full border rounded px-2 py-1.5 text-sm" /></div>
-                    <div className="mb-3">
-                      <div className="flex justify-between items-center mb-1"><label className="text-xs text-gray-600 font-semibold">잉크 배합</label><button onClick={addInkRow} className="text-xs text-blue-600 hover:text-blue-800">+ 잉크 추가</button></div>
-                      {sampleForm.ink_items.map((item, idx) => (
-                        <div key={idx} className="relative flex gap-2 mb-1">
-                          <div className="flex-1 relative">
-                            <input type="text" placeholder="잉크명 (검색 가능)" value={item.ink_name}
-                              onChange={(e) => updateInkRow(idx, "ink_name", e.target.value)}
-                              onFocus={() => { setActiveInkIdx(idx); if (item.ink_name.trim()) { api.get(`/api/search/inks?q=${encodeURIComponent(item.ink_name)}`).then(r => setInkSearchResults(r.data)).catch(() => {}); } }}
-                              onBlur={() => setTimeout(() => { if (activeInkIdx === idx) { setActiveInkIdx(null); setInkSearchResults([]); } }, 200)}
-                              className="w-full border rounded px-2 py-1 text-sm" />
-                            {activeInkIdx === idx && inkSearchResults.length > 0 && (
-                              <div className="absolute top-full left-0 right-0 mt-0.5 bg-white border border-gray-200 rounded shadow-lg z-50 max-h-40 overflow-y-auto">
-                                {inkSearchResults.map(ink => (
-                                  <div key={ink.ink_id} onMouseDown={() => selectInk(idx, ink)}
-                                    className="px-2 py-1.5 hover:bg-blue-50 cursor-pointer text-sm flex items-center gap-2">
-                                    {ink.solid_L_SCI != null && (
-                                      <div className="w-4 h-4 rounded border border-gray-200 flex-shrink-0" style={{ backgroundColor: labToRgb(ink.solid_L_SCI, ink.solid_a_SCI, ink.solid_b_SCI) }} />
-                                    )}
-                                    <span className="font-medium">{ink.ink_name}</span>
-                                    <span className="text-xs text-gray-400 truncate">{[ink.ink_type, ink.manufacturer, ink.color_index].filter(Boolean).join(" · ")}</span>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
+                    <div className="flex justify-between items-center mb-3">
+                      <h3 className="text-sm font-semibold text-green-800">
+                        {editingSampleId ? "샘플 수정" : "새 샘플 등록"}
+                        {duplicatedFrom && <span className="ml-2 text-xs font-normal text-green-600 bg-green-100 px-2 py-0.5 rounded">📋 {duplicatedFrom} 기반</span>}
+                      </h3>
+                    </div>
+
+                    {/* 레시피 섹션 */}
+                    <div className="bg-white rounded-lg border p-3 mb-3">
+                      <div className="text-xs font-semibold text-gray-500 mb-2">레시피</div>
+                      <div className="mb-2"><input type="text" value={sampleForm.recipe_name} onChange={(e) => setSampleForm({ ...sampleForm, recipe_name: e.target.value })} placeholder="레시피명" className="w-full border rounded px-2 py-1.5 text-sm" /></div>
+                      <div className="mb-2">
+                        <div className="flex justify-between items-center mb-1"><label className="text-xs text-gray-600 font-semibold">잉크 배합</label><button onClick={addInkRow} className="text-xs text-blue-600 hover:text-blue-800">+ 잉크 추가</button></div>
+                        {sampleForm.ink_items.map((item, idx) => (
+                          <div key={idx} className="relative flex gap-2 mb-1">
+                            <div className="flex-1 relative">
+                              <input type="text" placeholder="잉크명 (검색 가능)" value={item.ink_name}
+                                onChange={(e) => updateInkRow(idx, "ink_name", e.target.value)}
+                                onFocus={() => {
+                                  setActiveInkIdx(idx);
+                                  if (item.ink_name.trim()) {
+                                    api.get(`/api/search/inks?q=${encodeURIComponent(item.ink_name)}`).then(r => setInkSearchResults(r.data)).catch(() => {});
+                                  } else if (recentlyUsedInks.length > 0) {
+                                    // 빈 상태에서 포커스 → 최근 사용 잉크 표시
+                                    setInkSearchResults(recentlyUsedInks.map((name, i) => ({
+                                      ink_id: -(i + 1), ink_name: name, ink_type: "최근 사용",
+                                    })));
+                                  }
+                                }}
+                                onBlur={() => setTimeout(() => { if (activeInkIdx === idx) { setActiveInkIdx(null); setInkSearchResults([]); } }, 200)}
+                                className="w-full border rounded px-2 py-1 text-sm" />
+                              {activeInkIdx === idx && inkSearchResults.length > 0 && (
+                                <div className="absolute top-full left-0 right-0 mt-0.5 bg-white border border-gray-200 rounded shadow-lg z-50 max-h-40 overflow-y-auto">
+                                  {inkSearchResults.map((ink, i) => {
+                                    const isRecent = ink.ink_type === "최근 사용";
+                                    return (
+                                      <div key={`${ink.ink_id}-${i}`} onMouseDown={() => selectInk(idx, ink)}
+                                        className="px-2 py-1.5 hover:bg-blue-50 cursor-pointer text-sm flex items-center gap-2">
+                                        {isRecent ? (
+                                          <span className="text-[10px] bg-blue-100 text-blue-600 px-1 rounded">최근</span>
+                                        ) : ink.solid_L_SCI != null && (
+                                          <div className="w-4 h-4 rounded border border-gray-200 flex-shrink-0" style={{ backgroundColor: labToRgb(ink.solid_L_SCI, ink.solid_a_SCI, ink.solid_b_SCI) }} />
+                                        )}
+                                        <span className="font-medium">{ink.ink_name}</span>
+                                        {!isRecent && <span className="text-xs text-gray-400 truncate">{[ink.ink_type, ink.manufacturer, ink.color_index].filter(Boolean).join(" · ")}</span>}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                            <input type="number" placeholder="g" value={item.weight_g || ""} onChange={(e) => updateInkRow(idx, "weight_g", parseFloat(e.target.value) || 0)} className="w-20 border rounded px-2 py-1 text-sm" />
+                            {sampleForm.ink_items.length > 1 && <button onClick={() => removeInkRow(idx)} className="text-red-400 text-xs">✕</button>}
                           </div>
-                          <input type="number" placeholder="g" value={item.weight_g || ""} onChange={(e) => updateInkRow(idx, "weight_g", parseFloat(e.target.value) || 0)} className="w-20 border rounded px-2 py-1 text-sm" />
-                          {sampleForm.ink_items.length > 1 && <button onClick={() => removeInkRow(idx)} className="text-red-400 text-xs">✕</button>}
+                        ))}
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div><label className="block text-xs text-gray-600 mb-1">신너 %</label><input type="number" value={sampleForm.thinner_pct || ""} onChange={(e) => setSampleForm({ ...sampleForm, thinner_pct: parseFloat(e.target.value) || 0 })} className="w-full border rounded px-2 py-1.5 text-sm" /></div>
+                        <div><label className="block text-xs text-gray-600 mb-1">경화제 %</label><input type="number" value={sampleForm.hardener_pct || ""} onChange={(e) => setSampleForm({ ...sampleForm, hardener_pct: parseFloat(e.target.value) || 0 })} className="w-full border rounded px-2 py-1.5 text-sm" /></div>
+                      </div>
+                    </div>
+
+                    {/* 측정값 섹션 */}
+                    <div className="bg-white rounded-lg border p-3 mb-3">
+                      <div className="text-xs font-semibold text-gray-500 mb-2">측정값 — L 필드에 &quot;L a b&quot; 붙여넣기 가능</div>
+                      <div className="mb-3">
+                        <label className="text-xs text-gray-600 font-semibold block mb-1">베이스 측정 (L* a* b*)</label>
+                        <div className="flex gap-2 items-center">
+                          <input type="number" placeholder="L" value={sampleForm.base_L_SCI ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, base_L_SCI: e.target.value ? parseFloat(e.target.value) : null })} onPaste={handleBasePaste} className="w-1/3 border rounded px-2 py-1 text-sm" />
+                          <input type="number" placeholder="a" value={sampleForm.base_a_SCI ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, base_a_SCI: e.target.value ? parseFloat(e.target.value) : null })} className="w-1/3 border rounded px-2 py-1 text-sm" />
+                          <input type="number" placeholder="b" value={sampleForm.base_b_SCI ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, base_b_SCI: e.target.value ? parseFloat(e.target.value) : null })} className="w-1/3 border rounded px-2 py-1 text-sm" />
+                          <ColorBox L={sampleForm.base_L_SCI} a={sampleForm.base_a_SCI} b={sampleForm.base_b_SCI} label="베이스" />
                         </div>
-                      ))}
-                    </div>
-                    <div className="grid grid-cols-2 gap-3 mb-3">
-                      <div><label className="block text-xs text-gray-600 mb-1">신너 %</label><input type="number" value={sampleForm.thinner_pct || ""} onChange={(e) => setSampleForm({ ...sampleForm, thinner_pct: parseFloat(e.target.value) || 0 })} className="w-full border rounded px-2 py-1.5 text-sm" /></div>
-                      <div><label className="block text-xs text-gray-600 mb-1">경화제 %</label><input type="number" value={sampleForm.hardener_pct || ""} onChange={(e) => setSampleForm({ ...sampleForm, hardener_pct: parseFloat(e.target.value) || 0 })} className="w-full border rounded px-2 py-1.5 text-sm" /></div>
-                    </div>
-                    <div className="mb-3">
-                      <label className="text-xs text-gray-600 font-semibold block mb-1">베이스 측정 (L* a* b*)</label>
-                      <div className="flex gap-2 items-center">
-                        <input type="number" placeholder="L" value={sampleForm.base_L_SCI ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, base_L_SCI: e.target.value ? parseFloat(e.target.value) : null })} className="w-1/3 border rounded px-2 py-1 text-sm" />
-                        <input type="number" placeholder="a" value={sampleForm.base_a_SCI ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, base_a_SCI: e.target.value ? parseFloat(e.target.value) : null })} className="w-1/3 border rounded px-2 py-1 text-sm" />
-                        <input type="number" placeholder="b" value={sampleForm.base_b_SCI ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, base_b_SCI: e.target.value ? parseFloat(e.target.value) : null })} className="w-1/3 border rounded px-2 py-1 text-sm" />
-                        <ColorBox L={sampleForm.base_L_SCI} a={sampleForm.base_a_SCI} b={sampleForm.base_b_SCI} label="베이스" />
                       </div>
-                    </div>
-                    <div className="mb-3">
-                      <label className="text-xs text-gray-600 font-semibold block mb-1">인쇄 측정 (L* a* b*)</label>
-                      <div className="flex gap-2 items-center">
-                        <input type="number" placeholder="L" value={sampleForm.print_L_SCI ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, print_L_SCI: e.target.value ? parseFloat(e.target.value) : null })} className="w-1/3 border rounded px-2 py-1 text-sm" />
-                        <input type="number" placeholder="a" value={sampleForm.print_a_SCI ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, print_a_SCI: e.target.value ? parseFloat(e.target.value) : null })} className="w-1/3 border rounded px-2 py-1 text-sm" />
-                        <input type="number" placeholder="b" value={sampleForm.print_b_SCI ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, print_b_SCI: e.target.value ? parseFloat(e.target.value) : null })} className="w-1/3 border rounded px-2 py-1 text-sm" />
-                        <ColorBox L={sampleForm.print_L_SCI} a={sampleForm.print_a_SCI} b={sampleForm.print_b_SCI} label="인쇄" />
+                      <div className="mb-2">
+                        <label className="text-xs text-gray-600 font-semibold block mb-1">인쇄 측정 (L* a* b*)</label>
+                        <div className="flex gap-2 items-center">
+                          <input type="number" placeholder="L" value={sampleForm.print_L_SCI ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, print_L_SCI: e.target.value ? parseFloat(e.target.value) : null })} onPaste={handlePrintPaste} className="w-1/3 border rounded px-2 py-1 text-sm" />
+                          <input type="number" placeholder="a" value={sampleForm.print_a_SCI ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, print_a_SCI: e.target.value ? parseFloat(e.target.value) : null })} className="w-1/3 border rounded px-2 py-1 text-sm" />
+                          <input type="number" placeholder="b" value={sampleForm.print_b_SCI ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, print_b_SCI: e.target.value ? parseFloat(e.target.value) : null })} className="w-1/3 border rounded px-2 py-1 text-sm" />
+                          <ColorBox L={sampleForm.print_L_SCI} a={sampleForm.print_a_SCI} b={sampleForm.print_b_SCI} label="인쇄" />
+                        </div>
                       </div>
+                      {/* 실시간 ΔE 미리 계산 */}
+                      {previewDeltaE !== null && (
+                        <div className="mt-2 flex items-center gap-2 px-2 py-1.5 rounded" style={{ backgroundColor: `${deltaColorHex(previewDeltaE)}10` }}>
+                          <span className="text-xs text-gray-600">예상 ΔE:</span>
+                          <span className="text-sm font-bold" style={{ color: deltaColorHex(previewDeltaE) }}>
+                            {previewDeltaE.toFixed(2)}
+                          </span>
+                          {previewDeltaE <= 1.0 && <span className="text-xs text-green-600">✓ 우수</span>}
+                          {previewDeltaE > 1.0 && previewDeltaE <= 3.0 && <span className="text-xs text-yellow-600">양호</span>}
+                          {previewDeltaE > 3.0 && previewDeltaE <= 6.0 && <span className="text-xs text-orange-600">보통</span>}
+                          {previewDeltaE > 6.0 && <span className="text-xs text-red-600">미흡</span>}
+                          <span className="text-[10px] text-gray-400 ml-auto">등록 전 미리보기 (CIEDE2000)</span>
+                        </div>
+                      )}
                     </div>
-                    <div className="mb-3"><label className="block text-xs text-gray-600 mb-1">메모</label><input type="text" value={sampleForm.note} onChange={(e) => setSampleForm({ ...sampleForm, note: e.target.value })} className="w-full border rounded px-2 py-1.5 text-sm" /></div>
+
+                    {/* 메모 */}
+                    <div className="mb-3"><input type="text" placeholder="메모 (선택)" value={sampleForm.note} onChange={(e) => setSampleForm({ ...sampleForm, note: e.target.value })} className="w-full border rounded px-2 py-1.5 text-sm" /></div>
                     <div className="flex gap-2 justify-end">
                       <button onClick={cancelForm} className="bg-gray-400 text-white px-3 py-1.5 rounded text-sm hover:bg-gray-500">취소</button>
                       <button onClick={() => saveSample(round.round_id)} className="bg-green-600 text-white px-3 py-1.5 rounded text-sm hover:bg-green-700">{editingSampleId ? "수정 완료" : "등록"}</button>
@@ -580,60 +853,119 @@ export default function ColorDetailPage() {
                   </div>
                 )}
 
+                {/* 샘플 목록 */}
                 {isOpen && (
-                  <div className="ml-6 mt-2 space-y-2">
+                  <div className="ml-6 mt-2">
                     {samples.length === 0 && showSampleForm !== round.round_id ? (
                       <p className="text-sm text-gray-400 py-2">등록된 샘플이 없습니다.</p>
+                    ) : isTableView ? (
+                      /* ===== 테이블 뷰 ===== */
+                      <div className="overflow-x-auto bg-white rounded-lg border">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="border-b bg-gray-50 text-xs text-gray-500">
+                              <th className="py-2 px-3 text-left">#</th>
+                              <th className="py-2 px-3 text-left">레시피</th>
+                              <th className="py-2 px-3 text-left">잉크 배합</th>
+                              <th className="py-2 px-3 text-right">L*</th>
+                              <th className="py-2 px-3 text-right">a*</th>
+                              <th className="py-2 px-3 text-right">b*</th>
+                              <th className="py-2 px-3 text-right">ΔE</th>
+                              <th className="py-2 px-3 text-right">액션</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {samples.map(sample => {
+                              const isBest = bestInRound?.sample_id === sample.sample_id && sample.delta_E !== null;
+                              return (
+                                <tr key={sample.sample_id} className={`border-b last:border-0 ${isBest ? "bg-green-50" : "hover:bg-gray-50"}`}>
+                                  <td className="py-2 px-3 font-medium whitespace-nowrap">
+                                    {sample.sample_number}
+                                    {sample.is_confirmed && <span className="ml-1">✅</span>}
+                                    {isBest && !sample.is_confirmed && <span className="ml-1 text-[10px] text-green-600">best</span>}
+                                  </td>
+                                  <td className="py-2 px-3 text-gray-600 max-w-[120px] truncate">{sample.recipe_name || "-"}</td>
+                                  <td className="py-2 px-3 text-xs text-gray-500 max-w-[200px] truncate">
+                                    {sample.ink_items?.map((i: any) => `${i.ink_name} ${i.weight_g}g`).join(" + ") || "-"}
+                                  </td>
+                                  <td className="py-2 px-3 text-right font-mono text-xs">{sample.print_L_SCI ?? "-"}</td>
+                                  <td className="py-2 px-3 text-right font-mono text-xs">{sample.print_a_SCI ?? "-"}</td>
+                                  <td className="py-2 px-3 text-right font-mono text-xs">{sample.print_b_SCI ?? "-"}</td>
+                                  <td className={`py-2 px-3 text-right font-bold text-xs ${deltaColor(sample.delta_E)}`}>
+                                    {sample.delta_E !== null ? sample.delta_E.toFixed(2) : "-"}
+                                  </td>
+                                  <td className="py-2 px-3 text-right whitespace-nowrap">
+                                    <button onClick={() => duplicateSample(sample, round.round_id)} className="text-indigo-500 hover:text-indigo-700 text-xs mr-1.5" title="이 샘플의 레시피를 복사하여 새 샘플 생성">복제</button>
+                                    <button onClick={() => openEditSampleForm(sample)} className="text-blue-500 hover:text-blue-700 text-xs mr-1.5">수정</button>
+                                    <button onClick={() => deleteSample(sample.sample_id)} className="text-red-400 hover:text-red-600 text-xs">삭제</button>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
                     ) : (
-                      samples.map((sample) => (
-                        <div key={sample.sample_id} className="bg-white rounded-lg border px-4 py-3">
-                          <div className="flex justify-between items-start">
-                            <div className="flex items-center gap-2">
-                              <span className="font-medium text-gray-800 text-sm">샘플 #{sample.sample_number}</span>
-                              {sample.recipe_name && <span className="text-xs text-gray-500">{sample.recipe_name}</span>}
-                              {sample.is_confirmed && <span className="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded">확정</span>}
-                              <ColorBox L={sample.base_L_SCI} a={sample.base_a_SCI} b={sample.base_b_SCI} label="베이스" />
-                              <ColorBox L={sample.print_L_SCI} a={sample.print_a_SCI} b={sample.print_b_SCI} label="인쇄" />
-                            </div>
-                            <div className="flex items-center gap-2">
-                              {!sample.is_confirmed && (
-                                <button 
-                                  onClick={async () => {
-                                    if (!confirm(`샘플 #${sample.sample_number}를 확정레시피로 등록하시겠습니까?`)) return;
-                                    try {
-                                      await api.post(`/api/recipes/from-sample/${sample.sample_id}`);
-                                      alert('확정레시피가 등록되었습니다!');
-                                      fetchRounds();
-                                    } catch (err: any) {
-                                      const msg = err.response?.data?.detail || '확정 실패';
-                                      alert(msg);
-                                    }
-                                  }}
-                                  className="bg-green-600 text-white px-2 py-1 rounded text-xs hover:bg-green-700"
-                                >
-                                  이 샘플로 확정
-                                </button>
+                      /* ===== 카드 뷰 ===== */
+                      <div className="space-y-2">
+                        {samples.map((sample) => {
+                          const isBest = bestInRound?.sample_id === sample.sample_id && sample.delta_E !== null;
+                          return (
+                            <div key={sample.sample_id} className={`bg-white rounded-lg border px-4 py-3 ${isBest ? "border-green-300 bg-green-50/30" : ""}`}>
+                              <div className="flex justify-between items-start">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-medium text-gray-800 text-sm">샘플 #{sample.sample_number}</span>
+                                  {sample.recipe_name && <span className="text-xs text-gray-500">{sample.recipe_name}</span>}
+                                  {sample.is_confirmed && <span className="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded">확정</span>}
+                                  {isBest && !sample.is_confirmed && <span className="text-xs bg-green-50 text-green-600 px-1.5 py-0.5 rounded border border-green-200">best</span>}
+                                  <ColorBox L={sample.base_L_SCI} a={sample.base_a_SCI} b={sample.base_b_SCI} label="베이스" />
+                                  <ColorBox L={sample.print_L_SCI} a={sample.print_a_SCI} b={sample.print_b_SCI} label="인쇄" />
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  {!sample.is_confirmed && (
+                                    <button
+                                      onClick={async () => {
+                                        if (!confirm(`샘플 #${sample.sample_number}를 확정레시피로 등록하시겠습니까?`)) return;
+                                        try {
+                                          await api.post(`/api/recipes/from-sample/${sample.sample_id}`);
+                                          alert('확정레시피가 등록되었습니다!');
+                                          fetchRounds();
+                                        } catch (err: any) {
+                                          const msg = err.response?.data?.detail || '확정 실패';
+                                          alert(msg);
+                                        }
+                                      }}
+                                      className="bg-green-600 text-white px-2 py-1 rounded text-xs hover:bg-green-700"
+                                    >
+                                      이 샘플로 확정
+                                    </button>
+                                  )}
+                                  <button onClick={() => duplicateSample(sample, round.round_id)} className="text-indigo-500 hover:text-indigo-700 text-xs font-medium" title="이 샘플의 레시피를 복사하여 새 샘플 생성">복제</button>
+                                  <button onClick={() => openEditSampleForm(sample)} className="text-blue-500 hover:text-blue-700 text-xs">수정</button>
+                                  <button onClick={() => deleteSample(sample.sample_id)} className="text-red-400 hover:text-red-600 text-xs">삭제</button>
+                                </div>
+                              </div>
+                              {sample.ink_items && sample.ink_items.length > 0 && (
+                                <div className="mt-2 text-xs text-gray-600">
+                                  <span className="font-semibold">잉크:</span>{" "}
+                                  {sample.ink_items.map((i: any, idx: number) => (<span key={idx}>{i.ink_name} {i.weight_g}g{idx < sample.ink_items!.length - 1 ? " + " : ""}</span>))}
+                                  {sample.ink_total_g && <span className="ml-2 text-gray-400">(합계: {sample.ink_total_g}g / 총: {sample.total_weight_g}g)</span>}
+                                </div>
                               )}
-                              <button onClick={() => openEditSampleForm(sample)} className="text-blue-500 hover:text-blue-700 text-xs">수정</button>
-                              <button onClick={() => deleteSample(sample.sample_id)} className="text-red-400 hover:text-red-600 text-xs">삭제</button>
+                              {sample.print_L_SCI !== null && (
+                                <div className="mt-2 flex gap-4 text-xs">
+                                  <span className="text-gray-500">인쇄 Lab: ({sample.print_L_SCI}, {sample.print_a_SCI}, {sample.print_b_SCI})</span>
+                                  {sample.delta_E !== null && <span className={deltaColor(sample.delta_E)}>ΔE = {sample.delta_E}</span>}
+                                  {sample.delta_L !== null && (
+                                    <span className="text-gray-400">ΔL:{sample.delta_L} Δa:{sample.delta_a} Δb:{sample.delta_b}</span>
+                                  )}
+                                </div>
+                              )}
+                              {sample.note && <div className="mt-1 text-xs text-gray-400">메모: {sample.note}</div>}
                             </div>
-                          </div>
-                          {sample.ink_items && sample.ink_items.length > 0 && (
-                            <div className="mt-2 text-xs text-gray-600">
-                              <span className="font-semibold">잉크:</span>{" "}
-                              {sample.ink_items.map((i: any, idx: number) => (<span key={idx}>{i.ink_name} {i.weight_g}g{idx < sample.ink_items!.length - 1 ? " + " : ""}</span>))}
-                              {sample.ink_total_g && <span className="ml-2 text-gray-400">(합계: {sample.ink_total_g}g / 총: {sample.total_weight_g}g)</span>}
-                            </div>
-                          )}
-                          {sample.print_L_SCI !== null && (
-                            <div className="mt-2 flex gap-4 text-xs">
-                              <span className="text-gray-500">인쇄 Lab: ({sample.print_L_SCI}, {sample.print_a_SCI}, {sample.print_b_SCI})</span>
-                              {sample.delta_E !== null && <span className={deltaColor(sample.delta_E)}>ΔE = {sample.delta_E}</span>}
-                            </div>
-                          )}
-                          {sample.note && <div className="mt-1 text-xs text-gray-400">메모: {sample.note}</div>}
-                        </div>
-                      ))
+                          );
+                        })}
+                      </div>
                     )}
                   </div>
                 )}
