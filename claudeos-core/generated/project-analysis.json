@@ -1,0 +1,126 @@
+{
+  "analyzedAt": "2026-04-10T15:18:46.774Z",
+  "lang": "ko",
+  "stack": {
+    "language": "typescript",
+    "languageVersion": "5",
+    "framework": null,
+    "frameworkVersion": null,
+    "buildTool": null,
+    "database": null,
+    "orm": null,
+    "frontend": "nextjs",
+    "frontendVersion": "16.2.2",
+    "packageManager": "npm",
+    "monorepo": null,
+    "workspaces": null,
+    "detected": [
+      "package.json",
+      "typescript",
+      "next.js"
+    ],
+    "port": 8080
+  },
+  "templates": {
+    "backend": null,
+    "frontend": "node-nextjs"
+  },
+  "isMultiStack": false,
+  "rootPackage": null,
+  "domains": [
+    {
+      "name": "master",
+      "type": "frontend",
+      "pages": 1,
+      "layouts": 0,
+      "clientFiles": 0,
+      "serverFiles": 1,
+      "components": 0,
+      "totalFiles": 1,
+      "rscPattern": "default"
+    },
+    {
+      "name": "dashboard",
+      "type": "frontend",
+      "pages": 1,
+      "layouts": 0,
+      "clientFiles": 0,
+      "serverFiles": 1,
+      "components": 0,
+      "totalFiles": 1,
+      "rscPattern": "default"
+    },
+    {
+      "name": "complementary",
+      "type": "frontend",
+      "pages": 1,
+      "layouts": 0,
+      "clientFiles": 0,
+      "serverFiles": 1,
+      "components": 0,
+      "totalFiles": 1,
+      "rscPattern": "default"
+    }
+  ],
+  "backendDomains": [],
+  "frontendDomains": [
+    {
+      "name": "master",
+      "type": "frontend",
+      "pages": 1,
+      "layouts": 0,
+      "clientFiles": 0,
+      "serverFiles": 1,
+      "components": 0,
+      "totalFiles": 1,
+      "rscPattern": "default"
+    },
+    {
+      "name": "dashboard",
+      "type": "frontend",
+      "pages": 1,
+      "layouts": 0,
+      "clientFiles": 0,
+      "serverFiles": 1,
+      "components": 0,
+      "totalFiles": 1,
+      "rscPattern": "default"
+    },
+    {
+      "name": "complementary",
+      "type": "frontend",
+      "pages": 1,
+      "layouts": 0,
+      "clientFiles": 0,
+      "serverFiles": 1,
+      "components": 0,
+      "totalFiles": 1,
+      "rscPattern": "default"
+    }
+  ],
+  "frontend": {
+    "exists": true,
+    "components": 3,
+    "pages": 6,
+    "hooks": 0,
+    "clientComponents": 0,
+    "serverPages": 6,
+    "layouts": 1,
+    "rscPattern": false
+  },
+  "activeDomains": {
+    "00.core": true,
+    "10.backend": false,
+    "20.frontend": true,
+    "30.security-db": false,
+    "40.infra": true,
+    "50.verification": true,
+    "90.optional": true
+  },
+  "summary": {
+    "totalDomains": 3,
+    "backendDomains": 0,
+    "frontendDomains": 3,
+    "totalFiles": 3
+  }
+}

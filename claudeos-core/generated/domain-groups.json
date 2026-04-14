@@ -1,0 +1,25 @@
+{
+  "generatedAt": "2026-04-10T15:18:46.774Z",
+  "isMultiStack": false,
+  "templates": {
+    "backend": null,
+    "frontend": "node-nextjs"
+  },
+  "totalDomains": 3,
+  "totalGroups": 1,
+  "maxDomainsPerGroup": 4,
+  "maxFilesPerGroup": 40,
+  "groups": [
+    {
+      "type": "frontend",
+      "template": "node-nextjs",
+      "domains": [
+        "master",
+        "dashboard",
+        "complementary"
+      ],
+      "estimatedFiles": 3,
+      "passNum": 1
+    }
+  ]
+}

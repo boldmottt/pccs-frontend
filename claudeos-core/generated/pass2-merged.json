@@ -1,0 +1,363 @@
+{
+  "mergedAt": "2026-04-11T00:35:00.000Z",
+  "passNum": 2,
+  "sourceFiles": ["pass1-1.json"],
+  "domainsAnalyzed": ["master", "dashboard", "complementary"],
+
+  "universalPatterns": {
+    "description": "Patterns shared by 100% of all analyzed domains",
+    "pageRoutingStructure": {
+      "router": "App Router",
+      "convention": "src/app/<domain>/page.tsx",
+      "layoutStrategy": "No domain-level layout files; root src/app/layout.tsx only",
+      "dynamicRoutes": "None found in any domain",
+      "middlewareUsage": "No middleware.ts found anywhere in the project"
+    },
+    "responseFlow": {
+      "apiRoutes": "None — no Next.js API routes exist. All data fetching calls external FastAPI backend directly.",
+      "orchestrationLayer": "Shared axios singleton at src/lib/api.ts; baseURL set from NEXT_PUBLIC_API_URL. No route handler or server action layer.",
+      "definitiveAnswer": "All API calls bypass Next.js route handlers entirely. The singleton axios client in src/lib/api.ts is the only orchestration layer."
+    },
+    "componentConventions": {
+      "fileNaming": "ComponentName.tsx (PascalCase)",
+      "directoryStructure": "Flat: src/components/ComponentName.tsx — no subdirectory per component",
+      "exportPattern": "default export for all page and component files",
+      "componentStructure": "Functional components only; no class components, no forwardRef, no memo",
+      "propsTypeDefinition": "TypeScript interface for props (e.g., interface Props { ... })",
+      "stylingApproach": "Inline style={{ }} objects exclusively in domain pages; root/home page (src/app/page.tsx) uses Tailwind CSS — inconsistency",
+      "uiLibrary": "None — all UI is hand-rolled with inline styles and SVG"
+    },
+    "dataFetchingStrategy": {
+      "approach": "Client-side only via useEffect + axios singleton",
+      "serverComponents": "None — all pages are 'use client'",
+      "serverActions": "None",
+      "libraryUsed": "axios (singleton from src/lib/api.ts)",
+      "pattern": "useEffect on mount with loading boolean via useState"
+    },
+    "stateManagement": {
+      "globalState": "None — no Zustand, Redux, Jotai, or Context API",
+      "serverState": "None — no TanStack Query or SWR",
+      "urlState": "None — no search params or route state used",
+      "localState": "useState only",
+      "optimisticUpdates": "None"
+    },
+    "errorLoadingHandling": {
+      "loadingPattern": "Boolean useState flag; inline conditional rendering or button disabled state",
+      "errorPattern": "try/catch with console.error; one domain uses alert() for user-visible errors",
+      "errorBoundary": "None — no error.tsx or React Error Boundary anywhere",
+      "loadingUI": "None — no loading.tsx, no skeleton components"
+    },
+    "middlewareTs": "Not present in the project"
+  },
+
+  "majorityPatterns": {
+    "description": "Patterns shared by 50%+ of domains",
+    "items": [
+      {
+        "pattern": "'use client' directive on all page files",
+        "domains": ["master", "dashboard", "complementary"],
+        "coverage": "100%"
+      },
+      {
+        "pattern": "axios via shared @/lib/api singleton for data fetching",
+        "domains": ["master", "dashboard", "complementary"],
+        "coverage": "100%"
+      },
+      {
+        "pattern": "Inline style={{ }} objects as sole styling method",
+        "domains": ["master", "dashboard", "complementary"],
+        "coverage": "100%"
+      },
+      {
+        "pattern": "default export functional component",
+        "domains": ["master", "dashboard", "complementary"],
+        "coverage": "100%"
+      },
+      {
+        "pattern": "Back-to-main navigation button ('← 메인') using router.push('/')",
+        "domains": ["master", "dashboard", "complementary"],
+        "coverage": "100%"
+      },
+      {
+        "pattern": "Korean (한국어) UI language",
+        "domains": ["master", "dashboard", "complementary"],
+        "coverage": "100%"
+      },
+      {
+        "pattern": "No testing framework, no test files",
+        "domains": ["master", "dashboard", "complementary"],
+        "coverage": "100%"
+      },
+      {
+        "pattern": "No logging, monitoring, or analytics",
+        "domains": ["master", "dashboard", "complementary"],
+        "coverage": "100%"
+      },
+      {
+        "pattern": "ΔE color thresholds: <1 → #10b981, 1–3 → #3b82f6, 3–6 → #f59e0b, ≥6 → #ef4444",
+        "domains": ["dashboard", "complementary"],
+        "coverage": "67%"
+      },
+      {
+        "pattern": "labToRgb imported correctly from @/lib/color",
+        "domains": ["dashboard", "complementary"],
+        "coverage": "67%",
+        "note": "master/page.tsx duplicates its own inline copy instead of importing"
+      }
+    ]
+  },
+
+  "domainSpecificPatterns": {
+    "auth": {
+      "domain": "None",
+      "detail": "No authentication found in any analyzed domain"
+    },
+    "realTimeFeatures": {
+      "domain": "None",
+      "detail": "No WebSocket, SSE, or real-time pattern found"
+    },
+    "fileUpload": {
+      "domain": "None",
+      "detail": "No file upload pattern found"
+    },
+    "i18n": {
+      "domain": "None",
+      "detail": "No i18n library used; all text is hardcoded Korean strings"
+    },
+    "seoOptimization": {
+      "domain": "None",
+      "detail": "Root layout.tsx has a static metadata export; domain pages have no metadata"
+    },
+    "customSvgVisualization": {
+      "domain": "master",
+      "detail": "Hand-rolled SVG components: OpacityGauge (semicircle gauge), InkDonutChart (donut chart) — no chart library"
+    },
+    "tabBasedMultiEntityCRUD": {
+      "domain": "master",
+      "detail": "Single page manages 6 entity types (inks, plates, pads, base_colors, white_refs, recipes) via tab state with a dynamic renderField() form-builder"
+    },
+    "parallelMethodComparison": {
+      "domain": "complementary",
+      "detail": "Promise.all across 3 complementary-color calculation methods for side-by-side comparison"
+    },
+    "liveColorPreview": {
+      "domain": "complementary",
+      "detail": "Real-time Lab→RGB preview rendered from state before API call; overlapping circle preview using absolute positioning"
+    },
+    "cssBarchartVisualization": {
+      "domain": "dashboard",
+      "detail": "ΔE distribution shown as inline CSS width-percentage bar chart with transition animation — no chart library"
+    }
+  },
+
+  "antiPatternSummary": {
+    "CRITICAL": [
+      {
+        "issue": "labToRgb function duplicated in master/page.tsx",
+        "detail": "Defines its own copy instead of importing from @/lib/color — divergence risk if color math changes",
+        "domains": ["master"]
+      },
+      {
+        "issue": "master/page.tsx exceeds 800-line file size guideline significantly",
+        "detail": "Single monolithic file violates the <800 line rule; difficult to maintain or test",
+        "domains": ["master"]
+      }
+    ],
+    "HIGH": [
+      {
+        "issue": "form state typed as useState<any>({})",
+        "detail": "Complete loss of type safety for all form field operations in master domain",
+        "domains": ["master"]
+      },
+      {
+        "issue": "alert() used for validation and error feedback",
+        "detail": "Blocks the UI thread, cannot be styled, inaccessible — should be replaced with inline error state",
+        "domains": ["complementary"]
+      },
+      {
+        "issue": "No error boundary or error.tsx anywhere",
+        "detail": "Unhandled API errors silently fail or leave page in loading state with no user feedback",
+        "domains": ["master", "dashboard", "complementary"]
+      },
+      {
+        "issue": "CATEGORY_LABELS / CATEGORY_COLORS constants duplicated",
+        "detail": "Defined in both master/page.tsx and InkDonutChart.tsx — single source of truth needed",
+        "domains": ["master"]
+      }
+    ],
+    "MEDIUM": [
+      {
+        "issue": "No loading skeleton — blank render until data arrives",
+        "detail": "All domains show nothing while loading; no skeleton, spinner, or placeholder",
+        "domains": ["master", "dashboard", "complementary"]
+      },
+      {
+        "issue": "URL state unused — shareable state lost",
+        "detail": "Lab values, active tabs, selected methods cannot be bookmarked or shared",
+        "domains": ["complementary", "master"]
+      },
+      {
+        "issue": "Inline sub-components (LabBox) defined inside page function",
+        "detail": "Creates a new function reference on every render; should be extracted to module scope or separate file",
+        "domains": ["master"]
+      },
+      {
+        "issue": "ink_items?: any[] type",
+        "detail": "Array of ink items in complementary domain has no typed interface",
+        "domains": ["complementary"]
+      },
+      {
+        "issue": "Hardcoded locale string 'ko-KR' inline",
+        "detail": "Should be a named constant or config value",
+        "domains": ["dashboard"]
+      },
+      {
+        "issue": "Lab input split into 3 separate useState instead of a single object",
+        "detail": "Unnecessary state fragmentation for a naturally grouped value",
+        "domains": ["complementary"]
+      },
+      {
+        "issue": "No debounce on live preview computation",
+        "detail": "labToRgb recalculates on every keystroke with no throttling",
+        "domains": ["complementary"]
+      }
+    ],
+    "LOW": [
+      {
+        "issue": "Styling inconsistency: domain pages use inline styles, home page uses Tailwind",
+        "detail": "No unified styling strategy across the application",
+        "domains": ["master", "dashboard", "complementary"]
+      },
+      {
+        "issue": "No accessibility: no ARIA roles, labels, or keyboard navigation",
+        "detail": "Interactive elements lack accessible semantics throughout all domains",
+        "domains": ["master", "dashboard", "complementary"]
+      },
+      {
+        "issue": "console.error with no user-visible feedback on API failures",
+        "detail": "Errors are logged but not surfaced to the user in dashboard and master",
+        "domains": ["master", "dashboard"]
+      },
+      {
+        "issue": "No empty state handling distinct from loading state",
+        "detail": "null stats vs loading state not visually differentiated",
+        "domains": ["dashboard"]
+      }
+    ]
+  },
+
+  "namingConventionsSummary": {
+    "fileAndDirectoryNaming": {
+      "pages": "kebab-case directories: src/app/<domain>/page.tsx (e.g., src/app/master/page.tsx)",
+      "components": "PascalCase files: src/components/ComponentName.tsx (e.g., OpacityGauge.tsx)",
+      "libraries": "camelCase files: src/lib/api.ts, src/lib/color.ts"
+    },
+    "componentEntryFilePattern": "ComponentName.tsx — single file per component, no index.tsx barrel files observed",
+    "componentExportPattern": "default export — all pages and components use default export exclusively",
+    "hookNaming": "use* prefix convention expected but no custom hooks found in analyzed domains",
+    "apiRoutePatterns": "No Next.js API routes exist — all API calls target external backend at NEXT_PUBLIC_API_URL",
+    "interfaceNaming": "PascalCase interface names, often colocated at top of consuming file (e.g., interface DashboardStats, interface Props)"
+  },
+
+  "sharedTypesAndComponents": {
+    "commonUIComponents": [
+      {
+        "name": "OpacityGauge",
+        "importPath": "from '@/components/OpacityGauge'",
+        "description": "SVG semicircle gauge for opacity/coverage score visualization"
+      },
+      {
+        "name": "InkDonutChart",
+        "importPath": "from '@/components/InkDonutChart'",
+        "description": "SVG donut chart for ink category breakdown; also exports inkCategorySlices"
+      },
+      {
+        "name": "TransparencySimulator",
+        "importPath": "from '@/components/TransparencySimulator'",
+        "description": "Visual simulation of ink transparency"
+      }
+    ],
+    "sharedHooks": [],
+    "utilityFunctions": [
+      {
+        "name": "labToRgb",
+        "importPath": "from '@/lib/color'",
+        "description": "Converts CIE Lab color values to RGB hex string"
+      },
+      {
+        "name": "api (axios instance)",
+        "importPath": "from '@/lib/api'",
+        "description": "Configured axios instance with baseURL from NEXT_PUBLIC_API_URL"
+      }
+    ],
+    "pathAliases": [
+      {
+        "alias": "@/",
+        "resolvedTo": "src/",
+        "usage": "Used consistently across all domains (e.g., @/lib/api, @/components/OpacityGauge)"
+      }
+    ],
+    "environmentVariables": [
+      {
+        "name": "NEXT_PUBLIC_API_URL",
+        "type": "string",
+        "default": "http://localhost:8001",
+        "usage": "Base URL for all axios API calls; set in src/lib/api.ts"
+      }
+    ],
+    "constantsEnumManagement": "Ad-hoc: constants defined inline per file (e.g., CATEGORY_LABELS, CATEGORY_COLORS); no shared constants module"
+  },
+
+  "securityAuthPatterns": {
+    "authenticationApproach": "None — no authentication implemented in any analyzed domain",
+    "middlewareProtectionStrategy": "None — no middleware.ts found",
+    "csrfXssPrevention": "None explicitly configured",
+    "envVarManagement": "NEXT_PUBLIC_API_URL uses NEXT_PUBLIC_ convention correctly for client-side exposure",
+    "contentSecurityPolicy": "None configured",
+    "otherSecurityNotes": "No sensitive data handling, no auth tokens, no session management observed"
+  },
+
+  "performancePatterns": {
+    "serverComponentUtilization": "None — all pages are 'use client'; no RSC usage",
+    "imageOptimization": "Not observed in analyzed domains",
+    "fontOptimization": "Not observed in analyzed domains",
+    "bundleOptimization": {
+      "dynamicImport": "None",
+      "treeshaking": "Default Next.js behavior only"
+    },
+    "cachingStrategy": {
+      "isr": "None",
+      "revalidate": "None",
+      "cacheTags": "None",
+      "clientSideCaching": "None — plain axios with no cache layer"
+    },
+    "webVitals": "Not monitored; no instrumentation"
+  },
+
+  "testingStrategySummary": {
+    "coverageLevel": "0% — no tests of any kind found",
+    "testClassificationSystem": "N/A",
+    "frameworks": "None installed",
+    "mockingStrategy": "None",
+    "storybookUsage": "None",
+    "testNamingConventions": "N/A",
+    "e2eTesting": "None",
+    "componentTesting": "None"
+  },
+
+  "loggingMonitoringStrategy": {
+    "errorTracking": "None — no Sentry, DataDog, or equivalent",
+    "analytics": "None",
+    "webVitalsMonitoring": "None",
+    "serverLogging": "None (no server-side code)",
+    "clientLogging": "console.error used ad-hoc in catch blocks; not structured"
+  },
+
+  "codeQualityTools": {
+    "lintFormatter": "Unknown from source analysis — no .eslintrc, .prettierrc, or biome.json inspected",
+    "preCommitHooks": "Unknown — no .husky or lint-staged config observed",
+    "typescriptStrictMode": "Unknown — tsconfig.json not inspected",
+    "ciIntegration": "Unknown — no CI config files observed in analyzed domains",
+    "notes": "Code quality tooling configuration was not part of the pass1 domain analysis; requires direct inspection of config files"
+  }
+}
