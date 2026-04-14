@@ -195,7 +195,7 @@ export default function HomePage() {
                   Paint Color Control System
                 </span>
                 <Tooltip content="색상 관리를 위한 통합 시스템입니다">
-                  <HelpIcon />
+                  <HelpIcon content="색상 관리를 위한 통합 시스템입니다" />
                 </Tooltip>
               </div>
             </div>
@@ -244,7 +244,7 @@ export default function HomePage() {
             <span className="text-xs text-blue-100 font-medium flex items-center gap-1">
               필터
               <Tooltip content="데이터를 조건별로 선택합니다">
-                <HelpIcon />
+                <HelpIcon content="데이터를 조건별로 선택합니다" />
               </Tooltip>
             </span>
             <FormSelect
@@ -258,7 +258,6 @@ export default function HomePage() {
                 { value: "confirmed", label: "확정" },
                 { value: "hold", label: "보류" },
               ]}
-              className="bg-white"
             />
             {customers.length > 0 && (
               <FormSelect
@@ -270,7 +269,6 @@ export default function HomePage() {
                   { value: "all", label: "전체 고객사" },
                   ...customers.map((c) => ({ value: c, label: c })),
                 ]}
-                className="bg-white"
               />
             )}
             {managers.length > 0 && (
@@ -283,7 +281,6 @@ export default function HomePage() {
                   { value: "all", label: "전체 담당자" },
                   ...managers.map((m) => ({ value: m, label: m })),
                 ]}
-                className="bg-white"
               />
             )}
             <div className="flex-1" />
@@ -325,7 +322,7 @@ export default function HomePage() {
                     새 그룹 생성
                   </span>
                   <Tooltip content="그룹을 생성하면 패턴을 이 그룹에 할당할 수 있습니다">
-                    <HelpIcon />
+                    <HelpIcon content="그룹을 생성하면 패턴을 이 그룹에 할당할 수 있습니다" />
                   </Tooltip>
                 </div>
                 <div className="flex gap-3 items-center">

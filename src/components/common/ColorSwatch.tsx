@@ -41,10 +41,8 @@ export function ColorSwatch({
         style={{
           backgroundColor: displayColor,
           backgroundImage: showAlpha
-            ? `linear-gradient(45deg, #ccc 25%, transparent 25%),
-               linear-gradient(-45deg, #ccc 25%, transparent 25%),
-               linear-gradient(45deg, transparent 75%, #ccc 75%),
-               linear-gradient(-45deg, transparent 75%, #ccc 75%)`,
+            ? 'linear-gradient(45deg, #ccc 25%, transparent 25%), linear-gradient(-45deg, #ccc 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #ccc 75%), linear-gradient(-45deg, transparent 75%, #ccc 75%)'
+            : undefined,
           backgroundSize: '8px 8px',
           backgroundPosition: '0 0, 0 4px, 4px -4px, -4px 0px',
         }}
